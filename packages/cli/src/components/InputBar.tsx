@@ -35,6 +35,8 @@ import { CommandMenu } from "./commandManu";
 import { useRenderer } from "@opentui/react";
 import { useCommandMenu } from "./commandManu/useCommandMenu";
 import type { Command } from "./commandManu/types";
+import { useToast } from "../providers/toast";
+import { useKeyboardLayer } from "../providers/keyboardLayer";
 
 export interface InputBarProps {
   /** Placeholder shown when the input is empty. */
@@ -70,7 +72,8 @@ export function InputBar({
     resolveCommand,
     setSelectedIndex,
   } = useCommandMenu();
-
+  const toast = useToast();
+  const { isTopLayer, setResponder } = useKeyboardLayer();
   useEffect(() => {
     const textArea = textAreaRef.current;
     if (!textArea) return;
@@ -101,12 +104,12 @@ export function InputBar({
             renderer.destroy();
             process.exit(0);
           },
+          toast: toast,
         });
       }
     },
     [onSubmit],
   );
-  const ref = useRef<TextareaRenderable>(null);
 
   const handleSubmit = useCallback(() => {
     if (disabled) return;
@@ -129,6 +132,21 @@ export function InputBar({
     const command = resolveCommand(index);
     handleCommand(command);
   }, []);
+
+  useEffect(() => {
+    setResponder("base", () => {
+      if (disabled) return false;
+      const textarea = textAreaRef.current;
+
+      if (textarea && textarea.plainText.length > 0) {
+        textarea.setText("");
+        return true;
+      }
+      return false;
+    });
+
+    return () => setResponder("base", null);
+  }, [isTopLayer, setResponder]);
   return (
     <box
       flexDirection="column"
@@ -154,7 +172,7 @@ export function InputBar({
         ref={textAreaRef}
         flexGrow={1}
         minHeight={1}
-        focused={focused}
+        focused={focused && (isTopLayer("base") || isTopLayer("command"))}
         placeholder={placeholder}
         placeholderColor={colors.textSubtle}
         textColor={colors.text}

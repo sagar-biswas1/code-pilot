@@ -3,6 +3,7 @@ import type { Command } from "./types";
 import { useMemo, useRef, useState } from "react";
 import { getFilteredCommands } from "./filterCommands";
 import { useKeyboard } from "@opentui/react";
+import { useKeyboardLayer } from "../../providers/keyboardLayer";
 
 type UseCommandMenuReturn = {
   showCommandMenu: boolean;
@@ -21,6 +22,7 @@ export function useCommandMenu(): UseCommandMenuReturn {
   const scrollRef = useRef<ScrollBoxRenderable | null>(null);
   const commandQuery =
     showCommandMenu && textValue.startsWith("/") ? textValue.slice(1) : "";
+  const { isTopLayer, push, pop } = useKeyboardLayer();
 
   const filteredCommands = useMemo(() => {
     return getFilteredCommands(commandQuery);
@@ -36,8 +38,14 @@ export function useCommandMenu(): UseCommandMenuReturn {
     const prefix = text.startsWith("/") ? text.slice(1) : null;
     if (prefix !== null && !prefix.includes(" ")) {
       setShowCommandMenu(true);
+      push("command", () => {
+        setShowCommandMenu(false);
+        pop("command");
+        return true;
+      });
     } else {
       setShowCommandMenu(false);
+      pop("command");
     }
   };
 
@@ -45,12 +53,13 @@ export function useCommandMenu(): UseCommandMenuReturn {
     const command = filteredCommands[index];
     if (command) {
       setShowCommandMenu(false);
+      pop("command");
     }
     return command;
   };
 
   useKeyboard((key) => {
-    if (!showCommandMenu) return;
+    if (!showCommandMenu || !isTopLayer("command")) return;
     if (key.name === "up") {
       setSelectedIndex((prev) => {
         const newIndex = Math.max(0, prev - 1);
@@ -76,6 +85,7 @@ export function useCommandMenu(): UseCommandMenuReturn {
       });
     } else if (key.name === "escape") {
       setShowCommandMenu(false);
+      pop("command");
     }
   });
   return {
