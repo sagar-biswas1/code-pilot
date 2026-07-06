@@ -12,7 +12,8 @@ import {
   type ToastProps,
   type ToastVariant,
 } from "./types";
-import { borders, colors, spacing, textVariant, type TextVariant } from "../../theme";
+import { borders, spacing, type TextVariant } from "../../theme";
+import { useTheme } from "../theme";
 
 export type ToastContextValue = {
   show: (props: ToastProps) => void;
@@ -59,24 +60,26 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
   );
 };
 
-/** Maps each variant to its accent color, leading glyph, and text token. */
+/** Maps each variant to its leading glyph and text/color token. */
 const VARIANT_META: Record<
   ToastVariant,
-  { color: string; icon: string; textVariant: TextVariant }
+  { colorToken: "info" | "success" | "warning" | "danger"; icon: string; textVariant: TextVariant }
 > = {
-  info: { color: colors.info, icon: "ℹ", textVariant: "info" },
-  success: { color: colors.success, icon: "✔", textVariant: "success" },
-  warning: { color: colors.warning, icon: "⚠", textVariant: "warning" },
-  error: { color: colors.danger, icon: "✖", textVariant: "danger" },
+  info: { colorToken: "info", icon: "ℹ", textVariant: "info" },
+  success: { colorToken: "success", icon: "✔", textVariant: "success" },
+  warning: { colorToken: "warning", icon: "⚠", textVariant: "warning" },
+  error: { colorToken: "danger", icon: "✖", textVariant: "danger" },
 };
 
 function Toast({ currentToast }: { currentToast: ToastProps | null }) {
   const { width } = useTerminalDimensions();
+  const { colors, textVariant } = useTheme();
 
   if (!currentToast) return null;
 
   const variant = currentToast.variant ?? "info";
   const meta = VARIANT_META[variant];
+  const color = colors[meta.colorToken];
 
   return (
     <box
@@ -93,9 +96,9 @@ function Toast({ currentToast }: { currentToast: ToastProps | null }) {
       paddingBottom={spacing.xs}
     
       borderStyle={borders.default}
-      borderColor={meta.color}
+      borderColor={color}
     >
-      <text fg={meta.color}>{meta.icon}</text>
+      <text fg={color}>{meta.icon}</text>
       <text {...textVariant("body")} wrapMode="word" width="100%">
         {currentToast.message}
       </text>

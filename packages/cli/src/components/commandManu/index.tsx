@@ -1,10 +1,14 @@
 import { type ScrollBoxRenderable } from "@opentui/core";
-import { colors, palette, spacing, textVariant } from "../../theme";
+import { palette, spacing } from "../../theme";
+import { useTheme } from "../../providers/theme";
 import { COMMANDS } from "./Commands";
 import { getFilteredCommands } from "./filterCommands";
 
+/** Most rows shown at once before the list scrolls. */
 const MAX_VISIBLE_ITEMS = 5;
 
+// Column widths are derived once from the full command list so every row aligns
+// and the menu width stays stable as the user filters.
 const NAME_COL_WIDTH =
   Math.max(...COMMANDS.map((command) => command.name.length)) + spacing.sm;
 
@@ -15,13 +19,23 @@ const DESCRIPTION_COL_WIDTH = Math.max(
 const MENU_WIDTH = NAME_COL_WIDTH + DESCRIPTION_COL_WIDTH + spacing.sm * 2;
 
 type CommandMenuProps = {
+  /** Filter query (text after the leading "/"). */
   query: string;
+  /** Index of the highlighted row. */
   selectedIndex: number;
+  /** Scroll container ref, owned by `useCommandMenu`. */
   scrollRef: React.RefObject<ScrollBoxRenderable | null> | null;
+  /** Called when a row is highlighted. */
   onSelect: (index: number) => void;
+  /** Called when a row is activated. */
   onExecute: (index: number) => void;
 };
 
+/**
+ * Renders the filtered slash-command list as an aligned name/description grid,
+ * highlighting the selected row. Shows a "No commands found" placeholder when
+ * the query matches nothing.
+ */
 export function CommandMenu({
   query,
   selectedIndex,
@@ -29,6 +43,7 @@ export function CommandMenu({
   onSelect,
   onExecute,
 }: CommandMenuProps) {
+  const { colors, textVariant } = useTheme();
   const filteredCommands = getFilteredCommands(query);
   const visibleHeight = Math.min(filteredCommands.length, MAX_VISIBLE_ITEMS);
 

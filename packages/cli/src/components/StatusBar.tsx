@@ -1,4 +1,5 @@
-import { colors, spacing, textVariant } from "../theme";
+import { spacing } from "../theme";
+import { useTheme } from "../providers/theme";
 
 export interface StatusBarProps {
   /** Short status label shown on the left (e.g. "Ready", "Thinking…"). */
@@ -9,16 +10,22 @@ export interface StatusBarProps {
   hints?: Array<{ key: string; label: string }>;
 }
 
+/** Key hints shown when the caller doesn't supply its own. */
 const DEFAULT_HINTS: Array<{ key: string; label: string }> = [
   { key: "↵", label: "send" },
   { key: "^C", label: "quit" },
 ];
 
+/**
+ * Single-line status strip: a status indicator on the left, a truncating
+ * contextual message in the middle, and key hints on the right.
+ */
 export function StatusBar({
   status = "Ready",
   message,
   hints = DEFAULT_HINTS,
 }: StatusBarProps) {
+  const { colors, textVariant } = useTheme();
   return (
     <box
       flexGrow={0}

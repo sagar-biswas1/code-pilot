@@ -1,9 +1,17 @@
+/**
+ * InputBar — the prompt input at the bottom of the screen.
+ *
+ * Wraps an OpenTUI textarea with custom key bindings, an inline slash-command
+ * menu (via {@link useCommandMenu}), and a status bar. Submitting either runs
+ * the selected command or forwards the text to `onSubmit`.
+ */
+
 import { useCallback, useEffect, useRef } from "react";
 import type {
   KeyBinding as TextareaKeyBinding,
   TextareaRenderable,
 } from "@opentui/core";
-import { borders, colors, spacing } from "../theme";
+import { borders, spacing } from "../theme";
 
 /**
  * Ctrl+A defaults to "line-home" (emacs style); select-all is only on super+A
@@ -37,6 +45,8 @@ import { useCommandMenu } from "./commandManu/useCommandMenu";
 import type { Command } from "./commandManu/types";
 import { useToast } from "../providers/toast";
 import { useKeyboardLayer } from "../providers/keyboardLayer";
+import { useDialog } from "../providers/dialog";
+import { useTheme } from "../providers/theme";
 
 export interface InputBarProps {
   /** Placeholder shown when the input is empty. */
@@ -73,6 +83,8 @@ export function InputBar({
     setSelectedIndex,
   } = useCommandMenu();
   const toast = useToast();
+  const dialog = useDialog();
+  const { colors } = useTheme();
   const { isTopLayer, setResponder } = useKeyboardLayer();
   useEffect(() => {
     const textArea = textAreaRef.current;
@@ -82,6 +94,7 @@ export function InputBar({
     };
   }, []);
 
+  // On Enter: run the highlighted command if the menu is open, else submit.
   onSubmitRef.current = () => {
     if (disabled) return;
     if (showCommandMenu) {
@@ -92,6 +105,7 @@ export function InputBar({
     handleSubmit();
   };
 
+  /** Clear the input and invoke a command's action with the app context. */
   const handleCommand = useCallback(
     (command: Command | void) => {
       const textarea = textAreaRef.current;
@@ -105,6 +119,7 @@ export function InputBar({
             process.exit(0);
           },
           toast: toast,
+          dialog: dialog,
         });
       }
     },
@@ -133,6 +148,8 @@ export function InputBar({
     handleCommand(command);
   }, []);
 
+  // Register the base-layer Ctrl+C responder: first press clears a non-empty
+  // input (handled here); an empty input falls through so the app can quit.
   useEffect(() => {
     setResponder("base", () => {
       if (disabled) return false;

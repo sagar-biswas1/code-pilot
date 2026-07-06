@@ -1,3 +1,17 @@
+/**
+ * Keyboard layer stack.
+ *
+ * A single stack of named layers (e.g. "base", "command", "dialog") arbitrates
+ * who owns the keyboard. Overlays `push` a layer when they open and `pop` it
+ * when they close; components use `isTopLayer(id)` to only react to keys while
+ * they're on top. This keeps Escape/arrow handling from leaking between the
+ * input, the command menu, and dialogs.
+ *
+ * The provider also owns Ctrl+C globally: it walks the stack top-down asking
+ * each layer's responder to handle it (e.g. clear the textarea), and quits only
+ * when no layer consumes it.
+ */
+
 import { useKeyboard, useRenderer } from "@opentui/react";
 import {
   createContext,
@@ -8,13 +22,19 @@ import {
   useState,
 } from "react";
 
+/** Returns true if it handled the key, stopping propagation to lower layers. */
 type Responder = () => boolean;
 
 type KeyboardLayerContextValue = {
+  /** Add a layer to the top of the stack with its Ctrl+C responder. */
   push: (id: string, responder: Responder) => void;
+  /** Remove a layer (and its responder) from the stack. */
   pop: (id: string) => void;
+  /** Reset the stack back to just the "base" layer. */
   clear: () => void;
+  /** Whether `id` is currently the topmost layer. */
   isTopLayer: (id: string) => boolean;
+  /** Set or clear a layer's Ctrl+C responder without touching the stack. */
   setResponder: (id: string, responder: Responder | null) => void;
 };
 
@@ -22,6 +42,7 @@ const KeyboardLayerContext = createContext<KeyboardLayerContextValue | null>(
   null,
 );
 
+/** Provides the layer stack and the global Ctrl+C handler. */
 export const KeyboardLayerProvider = ({
   children,
 }: {
@@ -102,6 +123,10 @@ export const KeyboardLayerProvider = ({
   );
 };
 
+/**
+ * Access the keyboard layer controls. Must be called within a
+ * `KeyboardLayerProvider`; throws otherwise.
+ */
 export function useKeyboardLayer() {
   const context = useContext(KeyboardLayerContext);
   if (!context) {

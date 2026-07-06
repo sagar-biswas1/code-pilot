@@ -1,5 +1,15 @@
+import { textVariant } from "../../theme";
+import { ThemeDialog } from "../ThemeDialog";
 import type { Command } from "./types";
 
+/**
+ * The registry of slash commands available in the command menu.
+ *
+ * Each entry pairs a name/description (shown in the menu) with an optional
+ * `action` that receives a {@link CommandContext} to affect the app. Commands
+ * without an `action`, or whose action only shows a toast, are placeholders
+ * for behavior that isn't wired up yet.
+ */
 export const COMMANDS: Command[] = [
   {
     name: "new",
@@ -58,9 +68,11 @@ export const COMMANDS: Command[] = [
     description: "Switch the active model",
     value: "/model",
     action: (ctx) => {
-      ctx.toast.show({
-        variant: "info",
-        message: "Model switched",
+      ctx.dialog.open({
+        title: "Select model",
+        children: (
+          <text {...textVariant("body")}>Model selection coming soon</text>
+        ),
       });
     },
   },
@@ -113,9 +125,9 @@ export const COMMANDS: Command[] = [
     description: "Change the color theme",
     value: "/theme",
     action: (ctx) => {
-      ctx.toast.show({
-        variant: "info",
-        message: "Theme changed",
+      ctx.dialog.open({
+        title: "Select theme",
+        children: <ThemeDialog />,
       });
     },
   },
@@ -160,6 +172,17 @@ export const COMMANDS: Command[] = [
       ctx.toast.show({
         variant: "info",
         message: "Opening credit purchase page in your browser",
+      });
+    },
+  },
+  {
+    name: "agents",
+    description: "Select the agent mood",
+    value: "/agents",
+    action: (ctx) => {
+      ctx.dialog.open({
+        title: "Select mood",
+        children: <text>Agent selection coming soon</text>,
       });
     },
   },
