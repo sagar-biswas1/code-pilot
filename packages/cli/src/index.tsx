@@ -18,40 +18,48 @@ import { ThemeProvider, useTheme } from "./providers/theme";
 import { ToastProvider } from "./providers/toast";
 import { KeyboardLayerProvider } from "./providers/keyboardLayer";
 import { DialogProvider } from "./providers/dialog";
+import { createMemoryRouter, RouterProvider } from "react-router";
+import { RootLayout } from "./layouts/rootLayout";
+import { Home } from "./screens/Home";
+import { NewSession } from "./screens/NewSession";
+import { Session } from "./screens/Session";
+
+const router = createMemoryRouter([
+  {
+    path: "/",
+    element: <RootLayout />,
+    children: [
+      {
+        index: true,
+        element: <Home />,
+      },
+      {
+        path: "sessions/new",
+        element: <NewSession />,
+      },
+      {
+        path: "sessions/:sessionId",
+        element: <Session />,
+      },
+    ],
+  },
+]);
 
 /** Root component — wires the global providers around the app content. */
 function App() {
-  return (
-    <ThemeProvider>
-      <ToastProvider>
-        <KeyboardLayerProvider>
-          <DialogProvider>
-            <AppContent />
-          </DialogProvider>
-        </KeyboardLayerProvider>
-      </ToastProvider>
-    </ThemeProvider>
-  );
+  return <RouterProvider router={router} />;
 }
-
-/** Screen layout: header at the top, flexible spacer, input pinned to bottom. */
-const AppContent = () => {
-  const { colors } = useTheme();
-  return (
-    <box flexGrow={1} backgroundColor={colors.background}>
-      <Header />
-      <box flexGrow={1} />
-      <box backgroundColor={colors.surface}>
-        <InputBar onSubmit={(value) => console.log(value)} />
-      </box>
-    </box>
-  );
-};
 
 const renderer = await createCliRenderer({
   targetFps: 60,
   // KeyboardLayerProvider owns Ctrl+C (clear textarea first, quit on the
   // second press) so the built-in exit must stay off.
   exitOnCtrlC: false,
+  // Pop the captured-log overlay automatically when something logs an error.
+  openConsoleOnError: true,
 });
+
+// OpenTUI captures console.* into an in-app overlay; show it so logs are visible.
+// renderer.console.show();
+
 createRoot(renderer).render(<App />);
