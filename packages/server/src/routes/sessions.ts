@@ -23,7 +23,7 @@ type MockSession = {
   cwd: string | null;
   userId: string;
   messages: MockMessage[];
-  createdAt: Date;
+  createdAt: string;
 };
 
 const sessions: MockSession[] = [];
@@ -52,24 +52,61 @@ const createSessionValidator = zValidator(
     if (!result.success) {
       return c.json({ message: "Invalid request body" }, 400);
     }
-    return result.data;
   },
 );
 
-const app = new Hono().get("/", async (c) => {
-  const result = sessions.map((session) => ({
-    id: session.id,
-    title: session.title,
-    cwd: session.cwd,
-    createdAt: session.createdAt,
-  }));
-  return c.json(result);
-}).get("/:id", async (c) => {
-  const { id } = c.req.param();
-  const session = sessions.find((session) => session.id === id);
-  if (!session) {
-    return c.json({ message: "Session not found" }, 404);
-  }
-  return c.json(session);
-})
-export default app;
+const sessionsRoutes = new Hono()
+  .get("/", async (c) => {
+    const result = sessions.map((session) => ({
+      id: session.id,
+      title: session.title,
+      cwd: session.cwd,
+      createdAt: session.createdAt,
+    }));
+    return c.json(result);
+  })
+  .get("/:id", async (c) => {
+    const { id } = c.req.param();
+    const session = sessions.find((session) => session.id === id);
+    if (!session) {
+      return c.json({ message: "Session not found" }, 404);
+    }
+    return c.json(session);
+  })
+  .post("/", createSessionValidator, async (c) => {
+    const { initialMessage, ...data } = c.req.valid("json");
+
+    if (!initialMessage) {
+      return c.json({ message: "Initial message is required" }, 400);
+    }
+
+    const id = String(nextId++);
+    const now = new Date().toISOString();
+    const messages: MockMessage[] = [];
+    const message: MockMessage = {
+      id,
+      role: initialMessage.role,
+      content: initialMessage.content,
+      mode: initialMessage.mode,
+      model: initialMessage.model ?? "",
+      createdAt: new Date(),
+      status: "pending",
+      parts: null,
+      duration: null,
+      sessionId: id,
+    };
+
+    messages.push(message);
+    const session: MockSession = {
+      id,
+      title: data.title,
+      cwd: data.cwd ?? null,
+      userId: "mock-user-id",
+      messages,
+      createdAt: now,
+    };
+    sessions.push(session);
+    return c.json(session, 201);
+  });
+
+export default sessionsRoutes;
