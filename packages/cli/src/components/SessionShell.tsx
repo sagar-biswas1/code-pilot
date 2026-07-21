@@ -3,7 +3,7 @@ import { InputBar } from "./InputBar";
 import { Spinner } from "./Spinner";
 
 type Props = {
-  children: React.ReactNode;
+  children?: React.ReactNode;
   onSubmit: (text: string) => void;
   inputDisabled?: boolean;
   loading?: boolean;

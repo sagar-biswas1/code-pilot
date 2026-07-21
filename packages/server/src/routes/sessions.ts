@@ -6,7 +6,7 @@ import { findSupportedChatModel } from "@codepilot/shared";
 
 type MockMessage = {
   id: string;
-  role: "user" | "assistant";
+  role: "user" | "assistant" | "error";
   content: string;
   createdAt: Date;
   mode: string;
@@ -75,6 +75,8 @@ const sessionsRoutes = new Hono()
   })
   .post("/", createSessionValidator, async (c) => {
     const { initialMessage, ...data } = c.req.valid("json");
+
+    await new Promise((resolve) => setTimeout(resolve, 10000));
 
     if (!initialMessage) {
       return c.json({ message: "Initial message is required" }, 400);
