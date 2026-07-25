@@ -3,45 +3,19 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { HTTPException } from "hono/http-exception";
 import { findSupportedChatModel } from "@codepilot/shared";
-
-type MockMessage = {
-  id: string;
-  role: "user" | "assistant" | "error";
-  content: string;
-  createdAt: Date;
-  mode: string;
-  model: string;
-  status: "pending" | "completed" | "error";
-  parts: null;
-  duration: null;
-  sessionId: string;
-};
-
-type MockSession = {
-  id: string;
-  title: string;
-  cwd: string | null;
-  userId: string;
-  messages: MockMessage[];
-  createdAt: string;
-};
-
-const sessions: MockSession[] = [];
-let nextId = 1;
+import { db } from "@codepilot/database";
+import { Role, Mode, MessageStatus } from "@codepilot/database/enums";
 
 const createSessionSchema = z.object({
   title: z.string().min(1),
   cwd: z.string().optional(),
   initialMessage: z.object({
-    role: z.enum(["user", "assistant"]),
+    role: z.enum(Role),
     content: z.string().min(1),
-    mode: z.string(),
-    model: z
-      .string()
-      .refine((id) => !!findSupportedChatModel(id), {
-        message: "Unsupported model",
-      })
-      .optional(),
+    mode: z.enum(Mode),
+    model: z.string().refine((id) => !!findSupportedChatModel(id), {
+      message: "Unsupported model",
+    }),
   }),
 });
 
@@ -57,58 +31,82 @@ const createSessionValidator = zValidator(
 
 const sessionsRoutes = new Hono()
   .get("/", async (c) => {
-    const result = sessions.map((session) => ({
-      id: session.id,
-      title: session.title,
-      cwd: session.cwd,
-      createdAt: session.createdAt,
-    }));
-    return c.json(result);
+    try {
+      const sessions = await db.session.findMany({
+        orderBy: {
+          createdAt: "desc",
+        },
+        select: {
+          id: true,
+          title: true,
+          cwd: true,
+          createdAt: true,
+        },
+      });
+      if (!sessions) {
+        return c.json([], 200);
+      }
+      return c.json(sessions);
+    } catch {
+      throw new HTTPException(500, { message: "Failed to fetch sessions" });
+    }
   })
   .get("/:id", async (c) => {
-    const { id } = c.req.param();
-    const session = sessions.find((session) => session.id === id);
-    if (!session) {
-      return c.json({ message: "Session not found" }, 404);
+    try {
+      const { id } = c.req.param();
+      const session = await db.session.findUnique({
+        where: {
+          id,
+        },
+        include: {
+          messages: {
+            orderBy: {
+              createdAt: "asc",
+            },
+          },
+        },
+      });
+
+      if (!session) {
+        return c.json({ message: "Session not found" }, 404);
+      }
+
+      return c.json(session);
+    } catch {
+      throw new HTTPException(500, { message: "Failed to fetch session" });
     }
-    return c.json(session);
   })
   .post("/", createSessionValidator, async (c) => {
-    const { initialMessage, ...data } = c.req.valid("json");
+    try {
+      const { initialMessage, ...data } = c.req.valid("json");
+      const session = await db.session.create({
+        data: {
+          ...data,
+          userId: "mock-user-id",
+          ...(initialMessage && {
+            messages: {
+              create: {
+                content: initialMessage.content,
+                role: initialMessage.role,
+                mode: initialMessage.mode,
+                model: initialMessage.model,
+                status: MessageStatus.COMPLETE,
+              },
+            },
+          }),
+        },
+        include: {
+          messages: true,
+        },
+      });
 
-    await new Promise((resolve) => setTimeout(resolve, 10000));
-
-    if (!initialMessage) {
-      return c.json({ message: "Initial message is required" }, 400);
+      if (!session) {
+        return c.json({ message: "Failed to create session" }, 500);
+      }
+      return c.json(session, 201);
+    } catch {
+      throw new HTTPException(500, { message: "Failed to create session" });
     }
-
-    const id = String(nextId++);
-    const now = new Date().toISOString();
-    const messages: MockMessage[] = [];
-    const message: MockMessage = {
-      id,
-      role: initialMessage.role,
-      content: initialMessage.content,
-      mode: initialMessage.mode,
-      model: initialMessage.model ?? "",
-      createdAt: new Date(),
-      status: "pending",
-      parts: null,
-      duration: null,
-      sessionId: id,
-    };
-
-    messages.push(message);
-    const session: MockSession = {
-      id,
-      title: data.title,
-      cwd: data.cwd ?? null,
-      userId: "mock-user-id",
-      messages,
-      createdAt: now,
-    };
-    sessions.push(session);
-    return c.json(session, 201);
   });
 
 export default sessionsRoutes;
