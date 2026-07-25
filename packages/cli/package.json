@@ -8,16 +8,20 @@
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "@types/react": "^19.2.0"
+    "@types/react": "^19.2.0",
+    "@codepilot/server": "workspace:*"
   },
   "peerDependencies": {
     "typescript": "^5"
   },
   "dependencies": {
+    "@codepilot/shared": "workspace:*",
     "@opentui/core": "^0.4.2",
     "@opentui/react": "^0.4.2",
+    "hono": "^4.12.30",
     "opentui-spinner": "^0.0.7",
     "react": "^19.2.6",
-    "react-router": "^8.1.0"
+    "react-router": "^8.1.0",
+    "zod": "^4.4.3"
   }
 }

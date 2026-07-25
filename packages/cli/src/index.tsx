@@ -34,12 +34,17 @@ const router = createMemoryRouter([
         element: <Home />,
       },
       {
-        path: "sessions/new",
-        element: <NewSession />,
-      },
-      {
-        path: "sessions/:sessionId",
-        element: <Session />,
+        path: "sessions",
+        children: [
+          {
+            path: "new",
+            element: <NewSession />,
+          },
+          {
+            path: ":sessionId",
+            element: <Session />,
+          },
+        ],
       },
     ],
   },
