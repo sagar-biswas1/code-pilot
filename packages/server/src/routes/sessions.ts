@@ -3,7 +3,7 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { HTTPException } from "hono/http-exception";
 import { findSupportedChatModel } from "@codepilot/shared";
-import { db } from "@codepilot/database";
+import { db } from "@codepilot/database/client";
 import { Role, Mode, MessageStatus } from "@codepilot/database/enums";
 
 const createSessionSchema = z.object({
