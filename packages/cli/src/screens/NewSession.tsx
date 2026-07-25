@@ -46,7 +46,7 @@ export function NewSession() {
             title: state?.message?.slice(0, 100),
             cwd: process.cwd(),
             initialMessage: {
-              role: "user",
+              role: "USER",
               content: state?.message,
               mode: "BUILD",
               model: DEFAULT_CHAT_MODEL_ID,

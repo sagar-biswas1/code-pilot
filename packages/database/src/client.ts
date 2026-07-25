@@ -1,7 +1,6 @@
-import  'dotenv/config'
-import {PrismaPg} from '@prisma/adapter-pg'
+import 'dotenv/config'
+import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '../generated/prisma/client'
-
 
 const databaseUrl = process.env.DATABASE_URL
 
@@ -10,9 +9,9 @@ if (!databaseUrl) {
 }
 
 const adapter = new PrismaPg({
-    connectionString: databaseUrl
+    connectionString: databaseUrl,
 })
 
 export const db = new PrismaClient({
-    adapter
+    adapter,
 })
