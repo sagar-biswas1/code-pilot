@@ -26,11 +26,11 @@ function ChatMessage({
 }: {
   message: sessionData["messages"][number];
 }) {
-  if (message.role === "user") {
+  if (message.role === "USER") {
     return <UserMessage message={message.content} />;
   }
 
-  if (message.role === "error") {
+  if (message.role === "ERROR") {
     return <ErrorMessage message={message.content} />;
   }
 

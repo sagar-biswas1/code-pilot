@@ -62,18 +62,33 @@ if (!env.isProduction) {
 }
 
 app.notFound((c) => {
-  // 404s are routine, so they get a breadcrumb rather than an issue of their own.
-  Sentry.addBreadcrumb({
-    category: "http",
-    level: "info",
-    message: `404 ${c.req.method} ${c.req.path}`,
+  const method = c.req.method;
+  const path = c.req.path;
+  const requestId = c.get("requestId");
+
+  // Captures a single grouped issue for all 404s
+  Sentry.captureMessage("Route Not Found", {
+    level: "warning",
+    // Fingerprint forces Sentry to group ALL 404 messages into one issue thread
+    fingerprint: ["route-not-found-404"],
+    tags: {
+      "http.method": method,
+      "http.path": path,
+      "http.status_code": "404",
+    },
+    extra: {
+      path,
+      method,
+      requestId,
+      url: c.req.url,
+    },
   });
 
   return c.json(
     {
       success: false,
       message: "Not Found",
-      requestId: c.get("requestId"),
+      requestId,
     },
     404,
   );
