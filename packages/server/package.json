@@ -2,11 +2,14 @@
     "name": "@codepilot/server",
     "version": "1.0.0",
     "dependencies": {
+        "@ai-sdk/anthropic": "^4.0.21",
+        "@ai-sdk/openai": "^4.0.20",
         "@codepilot/database": "workspace:*",
         "@codepilot/shared": "workspace:*",
         "@hono/zod-validator": "^0.9.0",
         "@sentry/bun": "^10.68.0",
         "@sentry/hono": "^10.68.0",
+        "ai": "^7.0.37",
         "dotenv": "^17.4.2",
         "hono": "^4.12.30",
         "zod": "^4.4.3"
