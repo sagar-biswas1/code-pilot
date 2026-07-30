@@ -128,76 +128,139 @@ async function streamAIResponse(
   }
 }
 
-const app = new Hono().post("/:sessionId", submitValidator, async (c) => {
-  const { sessionId } = c.req.param();
-  const session = await db.session.findUnique({
-    where: {
-      id: sessionId,
-    },
-    include: {
-      messages: {
-        orderBy: {
-          createdAt: "asc",
+const app = new Hono()
+  .post("/:sessionId", submitValidator, async (c) => {
+    const { sessionId } = c.req.param();
+    const session = await db.session.findUnique({
+      where: {
+        id: sessionId,
+      },
+      include: {
+        messages: {
+          orderBy: {
+            createdAt: "asc",
+          },
         },
       },
-    },
-  });
-  if (!session) {
-    return c.json({ error: "Session not found" }, 404);
-  }
-  const { content, mode, model } = c.req.valid("json");
-  await db.message.create({
-    data: {
-      sessionId,
-      role: "USER",
-      content,
-      status: MessageStatus.COMPLETE,
-      model,
-      mode,
-    },
-  });
-
-  const history = buildConversationHistory([
-    ...session.messages, // todo:limit to last 10 messages
-    {
-      role: "USER",
-      content,
-      status: MessageStatus.COMPLETE,
-    },
-  ]);
-
-  const abortController = new AbortController();
-  const stream = streamSSE(
-    c,
-    async (stream) => {
-      stream.onAbort(() => {
-        abortController.abort();
-      });
-      await streamAIResponse(stream, {
+    });
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+    const { content, mode, model } = c.req.valid("json");
+    await db.message.create({
+      data: {
         sessionId,
+        role: "USER",
+        content,
+        status: MessageStatus.COMPLETE,
         model,
-        history,
         mode,
-        abortController,
-      });
-    },
+      },
+    });
 
-    async (err, stream) => {
-      const message = err instanceof Error ? err.message : String(err);
+    const history = buildConversationHistory([
+      ...session.messages, // todo:limit to last 10 messages
+      {
+        role: "USER",
+        content,
+        status: MessageStatus.COMPLETE,
+      },
+    ]);
 
-      const errorEvent: ChatStreamEvent = {
-        type: "error",
-        message,
-      };
-      await stream.writeSSE({
-        event: "error",
-        data: JSON.stringify(errorEvent),
-      });
-      return stream.close();
-    },
-  );
-  return stream;
-});
+    const abortController = new AbortController();
+    const stream = streamSSE(
+      c,
+      async (stream) => {
+        stream.onAbort(() => {
+          abortController.abort();
+        });
+        await streamAIResponse(stream, {
+          sessionId,
+          model,
+          history,
+          mode,
+          abortController,
+        });
+      },
 
+      async (err, stream) => {
+        const message = err instanceof Error ? err.message : String(err);
 
+        const errorEvent: ChatStreamEvent = {
+          type: "error",
+          message,
+        };
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify(errorEvent),
+        });
+        return stream.close();
+      },
+    );
+    return stream;
+  })
+  .post("/:sessionId/resume", async (c) => {
+    const sessionId = c.req.param("sessionId");
+    const session = await db.session.findUnique({
+      where: {
+        id: sessionId,
+      },
+      include: {
+        messages: {
+          orderBy: {
+            createdAt: "asc",
+          },
+        },
+      },
+    });
+    if (!session) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+
+    const lastMessage = session.messages[session.messages.length - 1];
+    if (!lastMessage) {
+      return c.json({ error: "No messages found" }, 404);
+    }
+    if (lastMessage.role !== "USER") {
+      return c.json({ error: "Session has no user message to resume" }, 400);
+    }
+    if (!isSupportedChatModel(lastMessage.model)) {
+      return c.json(
+        {
+          error:
+            "Last message model is not supported, model: " + lastMessage.model,
+        },
+        400,
+      );
+    }
+    const history = buildConversationHistory(session.messages);
+    const abortController = new AbortController();
+    return streamSSE(
+      c,
+      async (stream) => {
+        stream.onAbort(() => {
+          abortController.abort();
+        });
+        await streamAIResponse(stream, {
+          sessionId,
+          model: lastMessage.model,
+          history,
+          mode: lastMessage.mode,
+          abortController,
+        });
+      },
+      async (err, stream) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const errorEvent: ChatStreamEvent = {
+          type: "error",
+          message,
+        };
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify(errorEvent),
+        });
+        return stream.close();
+      },
+    );
+  });
 export default app;
