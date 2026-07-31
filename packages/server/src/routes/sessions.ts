@@ -78,6 +78,13 @@ const sessionsRoutes = new Hono<AppEnv>()
       if (!sessions) {
         return c.json([], 200);
       }
+
+      logger.debug("Listed sessions", {
+        request_id: c.get("requestId"),
+        operation: "session.findMany",
+        session_count: sessions.length,
+      });
+
       return c.json(sessions);
     } catch (error) {
       logger.error("Failed to fetch sessions", {
@@ -109,8 +116,22 @@ const sessionsRoutes = new Hono<AppEnv>()
       });
 
       if (!session) {
+        // A missing id is a client mistake, so this stays a warning rather than
+        // an error — the 404 handler in `index.ts` only sees unmatched routes.
+        logger.warn("Session not found", {
+          request_id: c.get("requestId"),
+          operation: "session.findUnique",
+          session_id: id,
+        });
         return c.json({ message: "Session not found" }, 404);
       }
+
+      logger.debug("Fetched session", {
+        request_id: c.get("requestId"),
+        operation: "session.findUnique",
+        session_id: id,
+        message_count: session.messages.length,
+      });
 
       return c.json(session);
     } catch (error) {
@@ -152,6 +173,10 @@ const sessionsRoutes = new Hono<AppEnv>()
       });
 
       if (!session) {
+        logger.error("Session create returned no row", {
+          request_id: c.get("requestId"),
+          operation: "session.create",
+        });
         throw new HTTPException(500, { message: "Failed to create session" });
       }
 
