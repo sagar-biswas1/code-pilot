@@ -4,11 +4,12 @@ import {
   type SupportedChatModelID,
 } from "@codepilot/shared";
 import type { ClientResponse } from "hono/client";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { getErrorMessage } from "../lib/httpErrors";
 import { EventSourceParserStream } from "eventsource-parser/stream";
 export type ClientMessagePart = { type: "text"; text: string };
 import prettyMs from "pretty-ms";
+import { apiClient } from "../lib/apiClient";
 export type Message =
   | {
       id: string;
@@ -186,4 +187,114 @@ export function useChat(sessionId: string, initialMessage: Message[]) {
     },
     [updateMessages, emitParts, isActiveRequest],
   );
+  const runStream = useCallback(
+    async ({ mode, model, request }: RunStreamParams) => {
+      const controller = new AbortController();
+      const activeStream: ActiveStream = {
+        requestId: crypto.randomUUID(),
+        mode,
+        model,
+        parts: [],
+        controller,
+      };
+      activeStreamRef.current = activeStream;
+      setStreaming({ status: "streaming", parts: [], mode, model });
+      try {
+        const response = await request(controller);
+        await handleStream(response, activeStream);
+      } catch (error) {
+        console.error(error);
+        if (error instanceof Error && error.name === "AbortError") {
+          return;
+        }
+        const message =
+          error instanceof Error ? error.message : "unknown error";
+        updateMessages((prev) => [
+          ...prev,
+          { id: crypto.randomUUID(), role: "error", content: message },
+        ]);
+      } finally {
+        clearStream(activeStream.requestId);
+      }
+    },
+    [clearStream, handleStream, updateMessages, isActiveRequest],
+  );
+
+  const resume = useCallback(
+    async ({ mode, model }: Omit<SubmitParams, "userText">) => {
+      await runStream({
+        mode,
+        model,
+        request: async (controller) => {
+          return apiClient.chat[":sessionId"].resume.$post(
+            {
+              param: { sessionId },
+            },
+            {
+              init: {
+                signal: controller.signal,
+              },
+            },
+          );
+        },
+      });
+    },
+    [runStream, sessionId],
+  );
+
+  const hasAutoResumedRef = useRef(false);
+
+  useEffect(() => {
+    if (hasAutoResumedRef.current) return;
+
+    const last = initialMessage[initialMessage.length - 1];
+
+    if (!last || last.role !== "user") return;
+
+    hasAutoResumedRef.current = true;
+
+    void resume({
+      mode: last.mode,
+      model: last.model,
+    });
+  }, [initialMessage, resume]);
+
+  const submit = useCallback(
+    async ({ userText, mode, model }: SubmitParams) => {
+      const userMessage: Message = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: userText,
+        mode,
+        model,
+      };
+      updateMessages((prev) => [...prev, userMessage]);
+      await runStream({
+        mode,
+        model,
+        request: async (controller) => {
+          return apiClient.chat[":sessionId"].$post(
+            {
+              param: { sessionId },
+              json: { content: userText, mode, model },
+            },
+            {
+              init: { signal: controller.signal },
+            },
+          );
+        },
+      });
+    },
+    [updateMessages, runStream, sessionId],
+  );
+
+  const abort = useCallback(() => {
+    const activeStream = activeStreamRef.current;
+    if (!activeStream) return;
+    activeStream.controller.abort();
+    activeStreamRef.current = null;
+    setStreaming({ status: "idle" });
+  }, []);
+
+  return { messages, streaming, submit, abort };
 }

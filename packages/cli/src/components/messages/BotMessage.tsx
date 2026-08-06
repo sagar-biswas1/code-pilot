@@ -1,14 +1,19 @@
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../providers/theme";
+import type { ClientMessagePart } from "../../hooks/useChat";
+import { Mode } from "@codepilot/database/enums";
 
 type Props = {
-  content: string;
+  parts: ClientMessagePart[];
   model: string;
+  mode: Mode;
+  duration?: string;
+  streaming: boolean;
 };
 
-export function BotMessage({ content, model }: Props) {
+export function BotMessage({ parts, model, mode, duration, streaming }: Props) {
   const { colors } = useTheme();
-
+  const text = parts.filter((part) => part.type === "text").join("");
   return (
     <box width="100%" alignItems="center" justifyContent="center">
       <box paddingX={2} paddingY={1} width="100%">
@@ -19,13 +24,41 @@ export function BotMessage({ content, model }: Props) {
           backgroundColor={colors.surface}
           width="100%"
         >
-          <text>{content}</text>
+          <text>{text}</text>
         </box>
       </box>
       <box paddingX={2} paddingY={1} width="100%">
-        <box flexDirection="row" alignItems="center" >
-          <text fg={colors.info}>🤖</text>
-          <text attributes={TextAttributes.DIM}> {model}</text>
+        <box flexDirection="row" alignItems="center">
+          <text
+            fg={
+              mode === Mode.PLAN
+                ? colors.info
+                : mode === Mode.BUILD
+                  ? colors.warning
+                  : colors.success
+            }
+          >
+            🤖
+          </text>
+          <box flexDirection="row" gap={1}>
+            <text>
+              {mode === Mode.PLAN
+                ? "Plan"
+                : mode === Mode.BUILD
+                  ? "Build"
+                  : "Deploy"}
+            </text>
+            <text attributes={TextAttributes.DIM}>{model}</text>
+            <text attributes={TextAttributes.DIM}>🔍</text>
+            {duration && (
+              <box flexDirection="row" gap={1}>
+                {duration && (
+                  <text attributes={TextAttributes.DIM}>{duration}</text>
+                )}
+                {streaming && <text attributes={TextAttributes.DIM}>🔄</text>}
+              </box>
+            )}
+          </box>
         </box>
       </box>
     </box>
