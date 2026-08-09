@@ -13,7 +13,10 @@ type Props = {
 
 export function BotMessage({ parts, model, mode, duration, streaming }: Props) {
   const { colors } = useTheme();
-  const text = parts.filter((part) => part.type === "text").join("");
+  const text = parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
   return (
     <box width="100%" alignItems="center" justifyContent="center">
       <box paddingX={2} paddingY={1} width="100%">
@@ -51,13 +54,9 @@ export function BotMessage({ parts, model, mode, duration, streaming }: Props) {
             <text attributes={TextAttributes.DIM}>{model}</text>
             <text attributes={TextAttributes.DIM}>🔍</text>
             {duration && (
-              <box flexDirection="row" gap={1}>
-                {duration && (
-                  <text attributes={TextAttributes.DIM}>{duration}</text>
-                )}
-                {streaming && <text attributes={TextAttributes.DIM}>🔄</text>}
-              </box>
+              <text attributes={TextAttributes.DIM}>{duration}</text>
             )}
+            {streaming && <text attributes={TextAttributes.DIM}>🔄</text>}
           </box>
         </box>
       </box>
