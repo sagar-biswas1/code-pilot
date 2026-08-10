@@ -9,9 +9,17 @@ type Props = {
   mode: Mode;
   duration?: string;
   streaming: boolean;
+  interrupted?: boolean;
 };
 
-export function BotMessage({ parts, model, mode, duration, streaming }: Props) {
+export function BotMessage({
+  parts,
+  model,
+  mode,
+  duration,
+  streaming,
+  interrupted = false,
+}: Props) {
   const { colors } = useTheme();
   const text = parts
     .filter((part) => part.type === "text")
@@ -29,6 +37,7 @@ export function BotMessage({ parts, model, mode, duration, streaming }: Props) {
         >
           <text>{text}</text>
         </box>
+        {interrupted ? <text>Interrupted</text> : null}
       </box>
       <box paddingX={2} paddingY={1} width="100%">
         <box flexDirection="row" alignItems="center">

@@ -10,6 +10,9 @@ import { z } from "zod";
 import { BotMessage, ErrorMessage, UserMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
 import { getErrorMessage } from "../lib/httpErrors";
+import { useKeyboard } from "@opentui/react";
+import { MessageStatus } from "@codepilot/database/enums";
+import { useKeyboardLayer } from "../providers/keyboardLayer";
 import {
   DEFAULT_CHAT_MODEL_ID,
   type SupportedChatModelID,
@@ -52,6 +55,7 @@ function mapDBMessages(dbMessages: sessionData["messages"]): Message[] {
       model: message.model as SupportedChatModelID,
       parts: [{ type: "text", text: message.content }],
       duration: message.duration ? prettyMs(message.duration) : undefined,
+      interrupted: message.status === MessageStatus.INTERRUPTED,
     };
   });
 }
@@ -72,6 +76,7 @@ function ChatMessage({ message }: { message: Message }) {
       mode={message.mode}
       duration={message.duration}
       streaming={false}
+      interrupted={message.interrupted}
     />
   );
 }
@@ -81,7 +86,8 @@ function SessionChat({ session }: { session: sessionData }) {
     mapDBMessages(session.messages),
   );
 
-  const { messages, streaming, submit, abort } = useChat(
+  const { isTopLayer } = useKeyboardLayer();
+  const { messages, streaming, submit, abort, interrupt } = useChat(
     session.id,
     initialMessages,
   );
@@ -89,8 +95,20 @@ function SessionChat({ session }: { session: sessionData }) {
   useEffect(() => {
     return () => abort();
   }, []);
+
+  useKeyboard((key) => {
+    if (
+      key.name === "escape" &&
+      isTopLayer("base") &&
+      streaming.status === "streaming"
+    ) {
+      key.preventDefault();
+      interrupt();
+    }
+  });
   return (
     <SessionShell
+      interruptible={streaming.status === "streaming"}
       onSubmit={(text) =>
         submit({
           userText: text,

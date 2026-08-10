@@ -7,6 +7,7 @@ type Props = {
   onSubmit: (text: string) => void;
   inputDisabled?: boolean;
   loading?: boolean;
+  interruptible?: boolean;
 };
 
 export function SessionShell({
@@ -14,6 +15,7 @@ export function SessionShell({
   onSubmit,
   inputDisabled,
   loading,
+  interruptible = false,
 }: Props) {
   return (
     <box
@@ -53,6 +55,7 @@ export function SessionShell({
               gap={2}
             >
               <Spinner />
+              {interruptible ? <text>esc to Interrupt</text> : null}
             </box>
           ) : null}
         </box>

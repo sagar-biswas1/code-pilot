@@ -11,6 +11,9 @@ import { streamSSE } from "hono/streaming";
 import { logger } from "../lib/logger";
 import type { AppEnv } from "../types";
 
+
+const activeResumeSessionsIds = new Map<string, string>();
+
 const submitSchema = z.object({
   content: z.string(),
   mode: z.enum(Mode),
@@ -67,6 +70,19 @@ type StreamParams = {
   source: "submit" | "resume";
 };
 
+
+function getResumableUserMessage(
+  messages: {
+    role: "USER" | "ASSISTANT" | "ERROR";
+    model: string;
+    mode: Mode;
+  }[],
+) {
+  const lastMessage = messages[messages.length - 1];
+  if (!lastMessage || lastMessage.role !== "USER") return null;
+  return lastMessage;
+}
+
 async function streamAIResponse(
   stream: Parameters<Parameters<typeof streamSSE>[1]>[0],
   params: StreamParams,
@@ -83,6 +99,22 @@ async function streamAIResponse(
   const startTime = Date.now();
   const resolvedModel = resolveModel(model);
   let fullText = "";
+
+  const persistInterruptedMessage = async () => {
+    if (fullText.length === 0) return;
+    const elapsedMs = Date.now() - startTime;
+    const message = await db.message.create({
+      data: {
+        sessionId,
+        role: "ASSISTANT",
+        content: fullText,
+        status: MessageStatus.INTERRUPTED,
+        model,
+        mode,
+        duration: Math.round(elapsedMs / 1000),
+      },
+    });
+  };
 
   // Shared by every log line below so a single stream can be followed end to
   // end. Prompt and completion text are deliberately left out — only sizes.
@@ -128,6 +160,7 @@ async function streamAIResponse(
         duration_ms: Date.now() - startTime,
         text_length: fullText.length,
       });
+      await persistInterruptedMessage();
       return;
     }
 
@@ -167,6 +200,7 @@ async function streamAIResponse(
         duration_ms: Date.now() - startTime,
         text_length: fullText.length,
       });
+      await persistInterruptedMessage();
       return;
     }
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -198,6 +232,9 @@ async function streamAIResponse(
     });
   }
 }
+
+
+
 
 const app = new Hono<AppEnv>()
   .post("/:sessionId", submitValidator, async (c) => {
@@ -262,7 +299,7 @@ const app = new Hono<AppEnv>()
           abortController.abort();
         });
         await streamAIResponse(stream, {
-          sessionId,
+          sessionId: sessionId!,
           model,
           history,
           mode,
@@ -323,8 +360,8 @@ const app = new Hono<AppEnv>()
 
     // The three guards below are all client-side mistakes, so each is a warning
     // carrying the reason that made the resume impossible.
-    const lastMessage = session.messages[session.messages.length - 1];
-    if (!lastMessage) {
+    const resumableMessage = getResumableUserMessage(session.messages);
+    if (!resumableMessage) {
       logger.warn("Cannot resume session", {
         request_id: requestId,
         session_id: sessionId,
@@ -332,77 +369,100 @@ const app = new Hono<AppEnv>()
       });
       return c.json({ error: "No messages found" }, 404);
     }
-    if (lastMessage.role !== "USER") {
+    if (resumableMessage.role !== "USER") {
       logger.warn("Cannot resume session", {
         request_id: requestId,
         session_id: sessionId,
         reason: "last_message_not_user",
-        last_message_role: lastMessage.role,
+        last_message_role: resumableMessage.role,
       });
       return c.json({ error: "Session has no user message to resume" }, 400);
     }
-    if (!isSupportedChatModel(lastMessage.model)) {
+    if (!isSupportedChatModel(resumableMessage.model)) {
       logger.warn("Cannot resume session", {
         request_id: requestId,
         session_id: sessionId,
         reason: "unsupported_model",
-        model: lastMessage.model,
+        model: resumableMessage.model,
       });
       return c.json(
         {
           error:
-            "Last message model is not supported, model: " + lastMessage.model,
+            "Last message model is not supported, model: " +
+            resumableMessage.model,
         },
         400,
       );
     }
+
+    if (activeResumeSessionsIds.has(sessionId)) {
+      logger.warn("Cannot resume session", {
+        request_id: requestId,
+        session_id: sessionId,
+        reason: "session_already_resumed",
+      });
+      return c.json({ error: "Session already resumed" }, 400);
+    }
+    activeResumeSessionsIds.set(sessionId, sessionId);
     const history = buildConversationHistory(session.messages);
 
     logger.info("Chat session resumed", {
       request_id: requestId,
       session_id: sessionId,
-      model: lastMessage.model,
-      mode: lastMessage.mode,
+      model: resumableMessage.model,
+      mode: resumableMessage.mode,
       message_count: session.messages.length,
     });
 
-    const abortController = new AbortController();
-    return streamSSE(
-      c,
-      async (stream) => {
-        stream.onAbort(() => {
-          abortController.abort();
-        });
-        await streamAIResponse(stream, {
-          sessionId,
-          model: lastMessage.model,
-          history,
-          mode: lastMessage.mode,
-          abortController,
-          requestId,
-          source: "resume",
-        });
-      },
-      async (err, stream) => {
-        const message = err instanceof Error ? err.message : String(err);
+   try {
+     const abortController = new AbortController();
+     return streamSSE(
+       c,
+       async (stream) => {
+         stream.onAbort(() => {
+           abortController.abort();
+         });
+         await streamAIResponse(stream, {
+           sessionId,
+           model: resumableMessage.model,
+           history,
+           mode: resumableMessage.mode,
+           abortController,
+           requestId,
+           source: "resume",
+         });
+       },
+       async (err, stream) => {
+         activeResumeSessionsIds.delete(sessionId);
+         const message = err instanceof Error ? err.message : String(err);
 
-        logger.error("Chat SSE transport failed", {
-          request_id: requestId,
-          session_id: sessionId,
-          source: "resume",
-          error: String(err),
-        });
+         logger.error("Chat SSE transport failed", {
+           request_id: requestId,
+           session_id: sessionId,
+           source: "resume",
+           error: String(err),
+         });
 
-        const errorEvent: ChatStreamEvent = {
-          type: "error",
-          message,
-        };
-        await stream.writeSSE({
-          event: "error",
-          data: JSON.stringify(errorEvent),
-        });
-        return stream.close();
-      },
-    );
+         const errorEvent: ChatStreamEvent = {
+           type: "error",
+           message,
+         };
+         await stream.writeSSE({
+           event: "error",
+           data: JSON.stringify(errorEvent),
+         });
+         return stream.close();
+       },
+     );
+   } catch (err) {
+     logger.error("Chat session resume failed", {
+       request_id: requestId,
+       session_id: sessionId,
+       error: String(err),
+     });
+     return c.json({ error: "Failed to resume session" }, 500);
+   } finally {
+     activeResumeSessionsIds.delete(sessionId);
+   }
   });
 export default app;
