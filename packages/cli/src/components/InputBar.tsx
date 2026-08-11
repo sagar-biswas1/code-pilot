@@ -56,8 +56,6 @@ export interface InputBarProps {
   focused?: boolean;
   /** Whether the input is disabled. */
   disabled?: boolean;
-  /** Model id shown in the status bar. */
-  model?: string;
 }
 
 /**
@@ -70,7 +68,6 @@ export function InputBar({
   onSubmit,
   focused = true,
   disabled = false,
-  model = DEFAULT_CHAT_MODEL_ID,
 }: InputBarProps) {
   const { mode, toggleMode, setMode, setModel } = usePromptConfig();
   const textAreaRef = useRef<TextareaRenderable>(null);
