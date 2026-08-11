@@ -14,7 +14,13 @@
  * events to the components underneath.
  */
 
-import { createContext, useCallback, useContext, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import type { DialogProps as DialogContentProps  } from "./types";
 import { useKeyboardLayer } from "../keyboardLayer";
 import { useKeyboard, useTerminalDimensions } from "@opentui/react";
@@ -50,6 +56,13 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
   const [currentDialog, setCurrentDialog] = useState<DialogContentProps | null>(null);
   const { push, pop } = useKeyboardLayer();
 
+  // `close` is declared first because `open` captures it — the reverse order
+  // only worked by accident, since `close`'s identity happened to be stable.
+  const close = useCallback(() => {
+    setCurrentDialog(null);
+    pop("dialog");
+  }, [pop]);
+
   const open = useCallback(
     (props: DialogContentProps) => {
       setCurrentDialog(props);
@@ -60,15 +73,16 @@ export function DialogProvider({ children }: { children: React.ReactNode }) {
         return true;
       });
     },
-    [push, setCurrentDialog],
+    [push, close],
   );
-  const close = useCallback(() => {
-    setCurrentDialog(null);
-    pop("dialog");
-  }, [pop, setCurrentDialog]);
+
+  const value = useMemo<DialogContextValue>(
+    () => ({ open, close }),
+    [open, close],
+  );
 
   return (
-    <DialogContext.Provider value={{ open, close }}>
+    <DialogContext.Provider value={value}>
       {children}
       {currentDialog && (
         <Dialog currentDialogContent={currentDialog} close={close} />
@@ -99,10 +113,12 @@ function Dialog({ currentDialogContent, close }: DialogContent) {
   useKeyboard((key) => {
     if (!currentDialogContent || !isTopLayer("dialog")) return;
     if (key.name === "escape") {
+      // Stop the key reaching the focused widget underneath (e.g. the search
+      // input inside a `DialogSearchList`), which would otherwise also act on
+      // it. `useKeyboard` ignores return values — only this does anything.
+      key.preventDefault();
       close();
-      return true;
     }
-    return false;
   });
   const { title, children } = currentDialogContent || {};
   return (

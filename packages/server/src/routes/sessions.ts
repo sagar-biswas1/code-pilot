@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { HTTPException } from "hono/http-exception";
-import { findSupportedChatModel } from "@codepilot/shared";
+import { isSupportedChatModel } from "../lib/models";
 import { db } from "@codepilot/database/client";
 import { Role, Mode, MessageStatus } from "@codepilot/database/enums";
 import { logger } from "../lib/logger";
@@ -16,7 +16,10 @@ const createSessionSchema = z.object({
     role: z.enum(Role),
     content: z.string().min(1),
     mode: z.enum(Mode),
-    model: z.string().refine((id) => !!findSupportedChatModel(id), {
+    // The server's own predicate, not the shared catalogue's: a model whose
+    // provider has no SDK wired up would create a session that can never
+    // generate a reply.
+    model: z.string().refine(isSupportedChatModel, {
       message: "Unsupported model",
     }),
   }),
@@ -50,7 +53,9 @@ const createSessionValidator = zValidator(
         fields,
       });
 
-      return c.json({ message: "Invalid request body" }, 400);
+      // Error bodies are `{ error }` across every route so the CLI's
+      // `getErrorMessage` has one field to read.
+      return c.json({ error: "Invalid request body" }, 400);
     }
   },
 );
@@ -75,9 +80,6 @@ const sessionsRoutes = new Hono<AppEnv>()
           createdAt: true,
         },
       });
-      if (!sessions) {
-        return c.json([], 200);
-      }
 
       logger.debug("Listed sessions", {
         request_id: c.get("requestId"),
@@ -123,7 +125,7 @@ const sessionsRoutes = new Hono<AppEnv>()
           operation: "session.findUnique",
           session_id: id,
         });
-        return c.json({ message: "Session not found" }, 404);
+        return c.json({ error: "Session not found" }, 404);
       }
 
       logger.debug("Fetched session", {
@@ -151,34 +153,26 @@ const sessionsRoutes = new Hono<AppEnv>()
     const { initialMessage, ...data } = c.req.valid("json");
 
     try {
+      // `initialMessage` is required by the schema, so it is always present
+      // here — no conditional spread needed.
       const session = await db.session.create({
         data: {
           ...data,
           userId: "mock-user-id",
-          ...(initialMessage && {
-            messages: {
-              create: {
-                content: initialMessage.content,
-                role: initialMessage.role,
-                mode: initialMessage.mode,
-                model: initialMessage.model,
-                status: MessageStatus.COMPLETE,
-              },
+          messages: {
+            create: {
+              content: initialMessage.content,
+              role: initialMessage.role,
+              mode: initialMessage.mode,
+              model: initialMessage.model,
+              status: MessageStatus.COMPLETE,
             },
-          }),
+          },
         },
         include: {
           messages: true,
         },
       });
-
-      if (!session) {
-        logger.error("Session create returned no row", {
-          request_id: c.get("requestId"),
-          operation: "session.create",
-        });
-        throw new HTTPException(500, { message: "Failed to create session" });
-      }
 
       logger.info("Created session", {
         request_id: c.get("requestId"),
@@ -189,11 +183,6 @@ const sessionsRoutes = new Hono<AppEnv>()
 
       return c.json(session, 201);
     } catch (error) {
-      // Already shaped for the client (and already logged upstream) — let it through.
-      if (error instanceof HTTPException) {
-        throw error;
-      }
-
       logger.error("Failed to create session", {
         request_id: c.get("requestId"),
         operation: "session.create",

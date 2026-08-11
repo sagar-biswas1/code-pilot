@@ -20,10 +20,27 @@ export type ResolvedModel = {
   modelId: SupportedChatModelID;
 };
 
+/**
+ * Providers listed in the shared catalogue that this server can actually talk
+ * to. `@codepilot/shared` advertises google and azure models, but no SDK is
+ * wired up for them yet — requests for those must be rejected at validation
+ * time (400) rather than blowing up mid-stream (500).
+ */
+const IMPLEMENTED_PROVIDERS = ["anthropic", "openai"] as const;
+
+type ImplementedProvider = (typeof IMPLEMENTED_PROVIDERS)[number];
 type UnimplementedProvider = Exclude<
   SupportedChatModel["provider"],
-  "anthropic" | "openai"
+  ImplementedProvider
 >;
+
+function isImplementedProvider(
+  provider: SupportedProvider,
+): provider is ImplementedProvider {
+  return (IMPLEMENTED_PROVIDERS as readonly SupportedProvider[]).includes(
+    provider,
+  );
+}
 
 function assertUnsupportedProvider(provider: UnimplementedProvider): never {
   throw new Error(`Unsupported provider: ${provider}`);
@@ -56,15 +73,26 @@ function resolveSupportedModel(model: SupportedChatModel): ResolvedModel {
   }
 }
 
+/**
+ * True only for models this server can actually run.
+ *
+ * `findSupportedChatModel` is `Array.prototype.find`, so a miss is `undefined`
+ * — never `null`. Comparing against `null` made this predicate accept every
+ * string, which let unsupported model ids pass validation and then crash
+ * inside the SSE stream. The provider check is part of the same question:
+ * "supported" is worthless to a caller if the request still 500s.
+ */
 export function isSupportedChatModel(
   modelId: string,
 ): modelId is SupportedChatModelID {
-  return findSupportedChatModel(modelId) !== null;
+  const model = findSupportedChatModel(modelId);
+  return model !== undefined && isImplementedProvider(model.provider);
 }
 
 export function resolveModel(modelId: string): ResolvedModel {
-  if (!isSupportedChatModel(modelId)) {
+  const model = findSupportedChatModel(modelId);
+  if (!model || !isImplementedProvider(model.provider)) {
     throw new Error(`Unsupported model: ${modelId}`);
   }
-  return resolveSupportedModel(findSupportedChatModel(modelId)!);
+  return resolveSupportedModel(model);
 }

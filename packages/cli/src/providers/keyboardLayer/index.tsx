@@ -18,6 +18,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -74,7 +75,13 @@ export const KeyboardLayerProvider = ({
 
   const pop = useCallback((id: string) => {
     responders.current.delete(id);
-    setStack((prev) => prev.filter((layer) => layer !== id));
+    setStack((prev) => {
+      // Returning `prev` unchanged when the layer isn't on the stack keeps
+      // React from re-rendering every consumer. `pop("command")` runs on each
+      // keystroke while the menu is closed, so this matters.
+      if (!prev.includes(id)) return prev;
+      return prev.filter((layer) => layer !== id);
+    });
   }, []);
 
   const clear = useCallback(() => {
@@ -99,6 +106,18 @@ export const KeyboardLayerProvider = ({
     },
     [],
   );
+
+  /**
+   * `isTopLayer` changes identity whenever the stack does, so consumers that
+   * depend on it re-render on every push/pop — which is exactly what they want.
+   * Every other member is stable, so without this memo the new object literal
+   * would re-render the entire app on any provider render.
+   */
+  const value = useMemo<KeyboardLayerContextValue>(
+    () => ({ push, pop, clear, isTopLayer, setResponder }),
+    [push, pop, clear, isTopLayer, setResponder],
+  );
+
   useKeyboard((key) => {
     if (!key.ctrl || key.name !== "c") {
       return;
@@ -115,9 +134,7 @@ export const KeyboardLayerProvider = ({
     process.exit(0);
   });
   return (
-    <KeyboardLayerContext.Provider
-      value={{ push, pop, clear, isTopLayer, setResponder }}
-    >
+    <KeyboardLayerContext.Provider value={value}>
       {children}
     </KeyboardLayerContext.Provider>
   );

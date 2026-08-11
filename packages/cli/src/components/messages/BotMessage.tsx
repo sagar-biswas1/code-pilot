@@ -1,7 +1,7 @@
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../providers/theme";
 import type { ClientMessagePart } from "../../hooks/useChat";
-import { Mode } from "@codepilot/database/enums";
+import type { Mode } from "@codepilot/database/enums";
 
 type Props = {
   parts: ClientMessagePart[];
@@ -12,6 +12,17 @@ type Props = {
   interrupted?: boolean;
 };
 
+/**
+ * Label and accent per mode. Keyed off the enum so adding a mode to the Prisma
+ * schema surfaces as a type error here instead of silently falling through to
+ * a wrong default.
+ */
+const MODE_META: Record<Mode, { label: string; colorToken: "info" | "warning" }> =
+  {
+    PLAN: { label: "Plan", colorToken: "info" },
+    BUILD: { label: "Build", colorToken: "warning" },
+  };
+
 export function BotMessage({
   parts,
   model,
@@ -21,6 +32,7 @@ export function BotMessage({
   interrupted = false,
 }: Props) {
   const { colors } = useTheme();
+  const meta = MODE_META[mode];
   const text = parts
     .filter((part) => part.type === "text")
     .map((part) => part.text)
@@ -37,31 +49,18 @@ export function BotMessage({
         >
           <text>{text}</text>
         </box>
-        {interrupted ? <text>Interrupted</text> : null}
+        {interrupted ? (
+          <text fg={colors.warning} attributes={TextAttributes.DIM}>
+            Interrupted
+          </text>
+        ) : null}
       </box>
       <box paddingX={2} paddingY={1} width="100%">
         <box flexDirection="row" alignItems="center">
-          <text
-            fg={
-              mode === Mode.PLAN
-                ? colors.info
-                : mode === Mode.BUILD
-                  ? colors.warning
-                  : colors.success
-            }
-          >
-            🤖
-          </text>
+          <text fg={colors[meta.colorToken]}>🤖</text>
           <box flexDirection="row" gap={1}>
-            <text>
-              {mode === Mode.PLAN
-                ? "Plan"
-                : mode === Mode.BUILD
-                  ? "Build"
-                  : "Deploy"}
-            </text>
+            <text>{meta.label}</text>
             <text attributes={TextAttributes.DIM}>{model}</text>
-            <text attributes={TextAttributes.DIM}>🔍</text>
             {duration && (
               <text attributes={TextAttributes.DIM}>{duration}</text>
             )}

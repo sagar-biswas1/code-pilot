@@ -49,6 +49,8 @@ model Message {
   content String
   parts Json?
   mode Mode
+  /// Generation time in MILLISECONDS — the same unit as the `done` stream
+  /// event's `durationMs`, so the CLI can format either with `prettyMs`.
   duration Int?
   model String
   sessionId String
