@@ -1,5 +1,6 @@
 import { textVariant } from "../../theme";
 import { ThemeDialog } from "../ThemeDialog";
+import { SessionDialogueContent } from "../SessionDialogue";
 import type { Command } from "./types";
 
 /**
@@ -16,10 +17,9 @@ export const COMMANDS: Command[] = [
     description: "Create a new conversation",
     value: "/new",
     action: (ctx) => {
-      ctx.toast.show({
-        variant: "success",
-        message: "New conversation created",
-      });
+      // Home is the blank-prompt screen; a session row is only written once
+      // the user actually sends something.
+      ctx.navigate("/");
     },
   },
   {
@@ -103,9 +103,9 @@ export const COMMANDS: Command[] = [
     description: "Browse previous conversations",
     value: "/history",
     action: (ctx) => {
-      ctx.toast.show({
-        variant: "info",
-        message: "Conversation history",
+      ctx.dialog.open({
+        title: "Session history",
+        children: <SessionDialogueContent />,
       });
     },
   },

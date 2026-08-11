@@ -66,16 +66,25 @@ export function ThemeDialog() {
   return (
     <DialogSearchList
       items={themes}
-      getKey={(theme) => theme.id}
+      getKey={getThemeKey}
       renderItem={renderItem}
       onHighlight={handleHighlight}
       onSelect={handleSelect}
-      filterFn={(theme, query) =>
-        theme.label.toLowerCase().includes(query.toLowerCase()) ||
-        theme.id.toLowerCase().includes(query.toLowerCase())
-      }
-      Placeholder="Search themes…"
+      filterFn={matchesTheme}
+      placeholder="Search themes…"
       emptyText="No themes found"
     />
+  );
+}
+
+function getThemeKey(theme: ThemeDefinition) {
+  return theme.id;
+}
+
+function matchesTheme(theme: ThemeDefinition, query: string) {
+  const needle = query.toLowerCase();
+  return (
+    theme.label.toLowerCase().includes(needle) ||
+    theme.id.toLowerCase().includes(needle)
   );
 }

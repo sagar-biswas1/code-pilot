@@ -3,6 +3,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -52,8 +53,13 @@ export const ToastProvider = ({ children }: { children: React.ReactNode }) => {
   // Clean up any pending timer when the provider unmounts.
   useEffect(() => clearCurrentTimeout, [clearCurrentTimeout]);
 
+  // Stable identity: this provider re-renders every time a toast appears or
+  // expires, and an inline object literal would invalidate every effect that
+  // lists `toast` in its dependencies.
+  const value = useMemo<ToastContextValue>(() => ({ show }), [show]);
+
   return (
-    <ToastContext.Provider value={{ show }}>
+    <ToastContext.Provider value={value}>
       {children}
       <Toast currentToast={currentToast} />
     </ToastContext.Provider>

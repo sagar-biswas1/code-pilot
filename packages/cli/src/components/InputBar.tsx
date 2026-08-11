@@ -39,14 +39,16 @@ const KEY_BINDINGS: TextareaKeyBinding[] = [
   },
 ];
 import { StatusBar } from "./StatusBar";
-import { CommandMenu } from "./commandManu";
+import { CommandMenu } from "./commandMenu";
 import { useRenderer } from "@opentui/react";
-import { useCommandMenu } from "./commandManu/useCommandMenu";
-import type { Command } from "./commandManu/types";
+import { useCommandMenu } from "./commandMenu/useCommandMenu";
+import type { Command } from "./commandMenu/types";
 import { useToast } from "../providers/toast";
 import { useKeyboardLayer } from "../providers/keyboardLayer";
 import { useDialog } from "../providers/dialog";
 import { useTheme } from "../providers/theme";
+import { DEFAULT_CHAT_MODEL_ID } from "@codepilot/shared";
+import { useNavigate } from "react-router";
 
 export interface InputBarProps {
   /** Placeholder shown when the input is empty. */
@@ -57,6 +59,8 @@ export interface InputBarProps {
   focused?: boolean;
   /** Whether the input is disabled. */
   disabled?: boolean;
+  /** Model id shown in the status bar. */
+  model?: string;
 }
 
 /**
@@ -69,21 +73,23 @@ export function InputBar({
   onSubmit,
   focused = true,
   disabled = false,
+  model = DEFAULT_CHAT_MODEL_ID,
 }: InputBarProps) {
   const textAreaRef = useRef<TextareaRenderable>(null);
   const onSubmitRef = useRef<() => void>(() => {});
   const renderer = useRenderer();
   const {
     showCommandMenu,
-    CommandQuery,
+    commandQuery,
     selectedIndex,
     scrollRef,
-    handleConteChange,
+    handleContentChange,
     resolveCommand,
     setSelectedIndex,
   } = useCommandMenu();
   const toast = useToast();
   const dialog = useDialog();
+  const navigate = useNavigate();
   const { colors } = useTheme();
   const { isTopLayer, setResponder } = useKeyboardLayer();
   useEffect(() => {
@@ -107,23 +113,25 @@ export function InputBar({
 
   /** Clear the input and invoke a command's action with the app context. */
   const handleCommand = useCallback(
-    (command: Command | void) => {
+    (command: Command | undefined) => {
       const textarea = textAreaRef.current;
       if (!textarea || !command) return;
+      // Clearing the buffer directly doesn't fire `onContentChange`, so the
+      // menu's own view of the text has to be reset alongside it.
       textarea.setText("");
+      handleContentChange("");
 
-      if (command.action) {
-        command.action({
-          exit: () => {
-            renderer.destroy();
-            process.exit(0);
-          },
-          toast: toast,
-          dialog: dialog,
-        });
-      }
+      command.action?.({
+        exit: () => {
+          renderer.destroy();
+          process.exit(0);
+        },
+        navigate: (path) => navigate(path),
+        toast,
+        dialog,
+      });
     },
-    [onSubmit],
+    [handleContentChange, renderer, navigate, toast, dialog],
   );
 
   const handleSubmit = useCallback(() => {
@@ -140,13 +148,18 @@ export function InputBar({
     const textarea = textAreaRef.current;
     if (!textarea) return;
 
-    handleConteChange(textarea.plainText);
-  }, [handleConteChange]);
+    handleContentChange(textarea.plainText);
+  }, [handleContentChange]);
 
-  const handleCommandExecute = useCallback((index: number) => {
-    const command = resolveCommand(index);
-    handleCommand(command);
-  }, []);
+  // Empty deps here captured the *first* render's `resolveCommand`, which
+  // closes over the unfiltered command list — so clicking a row after typing
+  // a query ran whichever command sat at that index before filtering.
+  const handleCommandExecute = useCallback(
+    (index: number) => {
+      handleCommand(resolveCommand(index));
+    },
+    [resolveCommand, handleCommand],
+  );
 
   // Register the base-layer Ctrl+C responder: first press clears a non-empty
   // input (handled here); an empty input falls through so the app can quit.
@@ -177,7 +190,7 @@ export function InputBar({
       {showCommandMenu && (
         <box position="absolute" top="-100%" width="100%" zIndex={1000}>
           <CommandMenu
-            query={CommandQuery}
+            query={commandQuery}
             selectedIndex={selectedIndex}
             scrollRef={scrollRef}
             onSelect={setSelectedIndex}
@@ -199,7 +212,8 @@ export function InputBar({
 
       <box width="100%" marginTop={spacing.xs}>
         <StatusBar
-          message="Opus 4.8.1"
+          status={disabled ? "Busy" : "Ready"}
+          message={model}
           hints={[
             { key: "↵", label: "send" },
             { key: "^C", label: "quit" },

@@ -3,7 +3,6 @@ import { useNavigate } from "react-router";
 import { useTheme } from "../providers/theme";
 import { Header } from "../components/Header";
 import { InputBar } from "../components/InputBar";
-import { Spinner } from "../components/Spinner";
 
 export function Home() {
   const { colors } = useTheme();

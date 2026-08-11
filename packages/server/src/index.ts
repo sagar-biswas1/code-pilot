@@ -87,10 +87,12 @@ app.notFound((c) => {
     },
   });
 
+  // `error` is the one field every error body carries, across routes and
+  // handlers alike, so the CLI only has to look in one place.
   return c.json(
     {
       success: false,
-      message: "Not Found",
+      error: "Not Found",
       requestId,
     },
     404,
@@ -155,7 +157,7 @@ app.onError((err, c) => {
   return c.json(
     {
       success: false,
-      message:
+      error:
         isServerError && env.isProduction
           ? "Internal Server Error"
           : err.message || "An error occurred",

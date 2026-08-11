@@ -4,7 +4,11 @@ const nodeEnv = process.env.NODE_ENV ?? "development";
 const isProduction = nodeEnv === "production";
 
 function toNumber(value: string | undefined, fallback: number) {
-  const parsed = Number(value);
+  // `Number("")` and `Number("  ")` are 0, not NaN — an unset-but-present var
+  // like `PORT=` would otherwise silently bind the server to port 0.
+  const trimmed = value?.trim();
+  if (!trimmed) return fallback;
+  const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
