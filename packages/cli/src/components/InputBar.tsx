@@ -33,14 +33,10 @@ const KEY_BINDINGS: TextareaKeyBinding[] = [
     shift: true,
     action: "newline",
   },
-  {
-    name: "backspace",
-    action: "delete-word-backward",
-  },
 ];
 import { StatusBar } from "./StatusBar";
 import { CommandMenu } from "./commandMenu";
-import { useRenderer } from "@opentui/react";
+import { useKeyboard, useRenderer } from "@opentui/react";
 import { useCommandMenu } from "./commandMenu/useCommandMenu";
 import type { Command } from "./commandMenu/types";
 import { useToast } from "../providers/toast";
@@ -49,6 +45,7 @@ import { useDialog } from "../providers/dialog";
 import { useTheme } from "../providers/theme";
 import { DEFAULT_CHAT_MODEL_ID } from "@codepilot/shared";
 import { useNavigate } from "react-router";
+import { usePromptConfig } from "../providers/promptConfig";
 
 export interface InputBarProps {
   /** Placeholder shown when the input is empty. */
@@ -59,8 +56,6 @@ export interface InputBarProps {
   focused?: boolean;
   /** Whether the input is disabled. */
   disabled?: boolean;
-  /** Model id shown in the status bar. */
-  model?: string;
 }
 
 /**
@@ -73,8 +68,8 @@ export function InputBar({
   onSubmit,
   focused = true,
   disabled = false,
-  model = DEFAULT_CHAT_MODEL_ID,
 }: InputBarProps) {
+  const { mode, toggleMode, setMode, setModel } = usePromptConfig();
   const textAreaRef = useRef<TextareaRenderable>(null);
   const onSubmitRef = useRef<() => void>(() => {});
   const renderer = useRenderer();
@@ -129,10 +124,31 @@ export function InputBar({
         navigate: (path) => navigate(path),
         toast,
         dialog,
+        mode,
+        setMode,
+        setModel,
       });
     },
-    [handleContentChange, renderer, navigate, toast, dialog],
+    [
+      handleContentChange,
+      renderer,
+      navigate,
+      toast,
+      dialog,
+      mode,
+      setMode,
+      setModel,
+    ],
   );
+
+  useKeyboard((key) => {
+    if (disabled) return;
+    if (!isTopLayer("base")) return;
+    if (key.name === "tab") {
+      key.preventDefault();
+      toggleMode();
+    }
+  });
 
   const handleSubmit = useCallback(() => {
     if (disabled) return;
@@ -212,8 +228,6 @@ export function InputBar({
 
       <box width="100%" marginTop={spacing.xs}>
         <StatusBar
-          status={disabled ? "Busy" : "Ready"}
-          message={model}
           hints={[
             { key: "↵", label: "send" },
             { key: "^C", label: "quit" },

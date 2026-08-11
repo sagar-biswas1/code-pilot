@@ -7,11 +7,7 @@
  * keyboard layer.
  */
 
-import {
-  TextAttributes,
-  type InputRenderable,
-  type ScrollBoxRenderable,
-} from "@opentui/core";
+import { TextAttributes, type ScrollBoxRenderable } from "@opentui/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useKeyboardLayer } from "../providers/keyboardLayer";
 import { useKeyboard } from "@opentui/react";
@@ -42,7 +38,6 @@ export function DialogSearchList<T>({
 }: DialogSearchListProps<T>) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [searchValue, setSearchValue] = useState("");
-  const inputRef = useRef<InputRenderable>(null);
   const scrollRef = useRef<ScrollBoxRenderable>(null);
   const { isTopLayer } = useKeyboardLayer();
   const { colors } = useTheme();
@@ -63,8 +58,10 @@ export function DialogSearchList<T>({
     );
   }, [filtered]);
 
-  const handleContentChange = useCallback(() => {
-    setSearchValue(inputRef.current?.value ?? "");
+  // `onInput` fires per keystroke; `onChange` only fires on blur/submit — and
+  // Enter is intercepted below to select, so `onChange` never runs at all.
+  const handleContentChange = useCallback((value: string) => {
+    setSearchValue(value);
     setSelectedIndex(0);
     scrollRef.current?.scrollTo(0);
   }, []);
@@ -119,12 +116,7 @@ export function DialogSearchList<T>({
 
   return (
     <box flexDirection="column" gap={1}>
-      <input
-        ref={inputRef}
-        focused
-        onChange={handleContentChange}
-        placeholder={placeholder}
-      />
+      <input focused onInput={handleContentChange} placeholder={placeholder} />
 
       {filtered.length === 0 ? (
         <text attributes={TextAttributes.DIM}>{emptyText}</text>

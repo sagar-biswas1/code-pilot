@@ -1,22 +1,20 @@
-import { useLocation, useNavigate, useParams } from "react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { MessageStatus } from "@codepilot/database/enums";
+import { type SupportedChatModelID } from "@codepilot/shared";
+import { useKeyboard } from "@opentui/react";
 import type { InferResponseType } from "hono/client";
 import prettyMs from "pretty-ms";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { z } from "zod";
-import { useKeyboard } from "@opentui/react";
-import { MessageStatus } from "@codepilot/database/enums";
-import {
-  DEFAULT_CHAT_MODEL_ID,
-  type SupportedChatModelID,
-} from "@codepilot/shared";
 
 import { SessionShell } from "../components/SessionShell";
 import { BotMessage, ErrorMessage, UserMessage } from "../components/messages";
+import { useChat, type Message } from "../hooks/useChat";
 import { apiClient } from "../lib/apiClient";
 import { getErrorMessage } from "../lib/httpErrors";
-import { useToast } from "../providers/toast";
 import { useKeyboardLayer } from "../providers/keyboardLayer";
-import { useChat, type Message } from "../hooks/useChat";
+import { usePromptConfig } from "../providers/promptConfig";
+import { useToast } from "../providers/toast";
 
 type SessionData = InferResponseType<
   (typeof apiClient.sessions)[":id"]["$get"],
@@ -89,6 +87,7 @@ function ChatMessage({ message }: { message: Message }) {
 }
 
 function SessionChat({ session }: { session: SessionData }) {
+  const { mode, model } = usePromptConfig();
   // Computed once per session — `useChat` seeds its own state from this and
   // owns the conversation from then on.
   const initialMessages = useMemo(
@@ -122,8 +121,8 @@ function SessionChat({ session }: { session: SessionData }) {
     (text: string) => {
       void submit({
         userText: text,
-        mode: "BUILD",
-        model: DEFAULT_CHAT_MODEL_ID,
+        mode,
+        model,
       });
     },
     [submit],

@@ -1,5 +1,7 @@
 import { spacing } from "../theme";
 import { useTheme } from "../providers/theme";
+import { usePromptConfig } from "../providers/promptConfig";
+import { useMemo } from "react";
 
 export interface StatusBarProps {
   /** Short status label shown on the left (e.g. "Ready", "Thinking…"). */
@@ -20,12 +22,12 @@ const DEFAULT_HINTS: Array<{ key: string; label: string }> = [
  * Single-line status strip: a status indicator on the left, a truncating
  * contextual message in the middle, and key hints on the right.
  */
-export function StatusBar({
-  status = "Ready",
-  message,
-  hints = DEFAULT_HINTS,
-}: StatusBarProps) {
+export function StatusBar({ hints = DEFAULT_HINTS }: StatusBarProps) {
   const { colors, textVariant } = useTheme();
+  const { mode, model } = usePromptConfig();
+  const message = useMemo(() => {
+    return `Model: ${model}`;
+  }, [mode, model]);
   return (
     <box
       flexGrow={0}
@@ -39,17 +41,29 @@ export function StatusBar({
       paddingRight={spacing.xs}
       paddingTop={spacing.xs}
       paddingBottom={spacing.xs}
-    
     >
       {/* Left: status indicator */}
-      <box flexShrink={0} flexDirection="row" alignItems="center" gap={spacing.xs}>
+      <box
+        flexShrink={0}
+        flexDirection="row"
+        alignItems="center"
+        gap={spacing.xs}
+      >
         <text fg={colors.success}>●</text>
-        <text {...textVariant("label")}>{status}</text>
-        <text fg={colors.accent} marginLeft={spacing.xs}>❯</text>
+        <text {...textVariant("label")}>{mode}</text>
+        <text fg={colors.accent} marginLeft={spacing.xs}>
+          ❯
+        </text>
       </box>
 
       {/* Middle: contextual message (single line, truncates instead of wrapping) */}
-      <box flexGrow={1} flexShrink={1} overflow="hidden" paddingLeft={spacing.sm} paddingRight={spacing.sm}>
+      <box
+        flexGrow={1}
+        flexShrink={1}
+        overflow="hidden"
+        paddingLeft={spacing.sm}
+        paddingRight={spacing.sm}
+      >
         {message ? (
           <text {...textVariant("subtle")} wrapMode="none" truncate>
             {message}
@@ -58,7 +72,12 @@ export function StatusBar({
       </box>
 
       {/* Right: key hints */}
-      <box flexShrink={0} flexDirection="row" alignItems="center" gap={spacing.sm}>
+      <box
+        flexShrink={0}
+        flexDirection="row"
+        alignItems="center"
+        gap={spacing.sm}
+      >
         {hints.map((hint) => (
           <box key={hint.key} flexDirection="row" gap={spacing.xs}>
             <text {...textVariant("label")}>{hint.key}</text>

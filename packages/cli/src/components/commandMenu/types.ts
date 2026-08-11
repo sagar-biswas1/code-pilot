@@ -1,5 +1,7 @@
+import type { Mode } from "@codepilot/database/enums";
 import type { DialogContextValue } from "../../providers/dialog";
 import type { ToastContextValue } from "../../providers/toast";
+import type { SupportedChatModelID } from "@codepilot/shared";
 
 /**
  * Capabilities handed to a command's `action`, so commands can affect the app
@@ -15,6 +17,9 @@ export type CommandContext = {
   toast: ToastContextValue;
   /** Open a modal dialog. */
   dialog: DialogContextValue;
+  mode: Mode;
+  setMode: (mode: Mode) => void;
+  setModel: (model: SupportedChatModelID) => void;
 };
 
 /** A single slash-command entry in the command menu. */

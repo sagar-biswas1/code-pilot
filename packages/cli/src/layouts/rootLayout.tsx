@@ -4,6 +4,7 @@ import { KeyboardLayerProvider } from "../providers/keyboardLayer";
 import { ThemeProvider } from "../providers/theme";
 import { ToastProvider } from "../providers/toast";
 import { ThemedRoot } from "./themeRoot";
+import { PromptConfigProvider } from "../providers/promptConfig";
 
 /**
  * Shared parent of every screen. Provider order is load-bearing:
@@ -19,9 +20,11 @@ export function RootLayout() {
       <ToastProvider>
         <KeyboardLayerProvider>
           <DialogProvider>
-            <ThemedRoot>
-              <Outlet />
-            </ThemedRoot>
+            <PromptConfigProvider>
+              <ThemedRoot>
+                <Outlet />
+              </ThemedRoot>
+            </PromptConfigProvider>
           </DialogProvider>
         </KeyboardLayerProvider>
       </ToastProvider>
