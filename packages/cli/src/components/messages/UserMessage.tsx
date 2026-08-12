@@ -1,11 +1,13 @@
 import { TextAttributes } from "@opentui/core";
 import { useTheme } from "../../providers/theme";
+import type { Mode } from "@codepilot/database/enums";
 
 type Props = {
   message: string;
+  mode: Mode;
 };
 
-export function UserMessage({ message }: Props) {
+export function UserMessage({ message, mode }: Props) {
   const { colors } = useTheme();
 
   return (
@@ -15,10 +17,12 @@ export function UserMessage({ message }: Props) {
           justifyContent="center"
           paddingX={2}
           paddingY={1}
-          backgroundColor={colors.surface}
+          backgroundColor={
+            mode === "BUILD" ? colors.surface : colors.background
+          }
           width="100%"
         >
-          <text >{message}</text>
+          <text>{message}</text>
         </box>
       </box>
     </box>

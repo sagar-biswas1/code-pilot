@@ -1,7 +1,7 @@
 import type { Mode } from "@codepilot/database/enums";
 
 interface SystemPromptParams {
-  cwd: string;
+  cwd?: string;
   mode: Mode;
 }
 

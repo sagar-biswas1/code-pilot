@@ -17,6 +17,7 @@
 import type { Mode } from "@codepilot/database/enums";
 import {
   chatStreamEventSchema,
+  type MessagePart,
   type SupportedChatModelID,
 } from "@codepilot/shared";
 import type { ClientResponse } from "hono/client";
@@ -27,21 +28,13 @@ import prettyMs from "pretty-ms";
 import { getErrorMessage } from "../lib/httpErrors";
 import { apiClient } from "../lib/apiClient";
 
-export type ClientToolCallPart = {
-  type: "tool-call";
-  id: string;
-  name: string;
-  args: Record<string, unknown>;
-  result?: string;
+/** Wire `MessagePart` tool-call plus live `status` for in-flight calls. */
+export type ClientToolCallPart = Extract<MessagePart, { type: "tool-call" }> & {
   status: "calling" | "done";
 };
 export type ClientMessagePart =
-  | { type: "text"; text: string }
-  | ClientToolCallPart
-  | {
-      type: "reasoning";
-      text: string;
-    };
+  | Exclude<MessagePart, { type: "tool-call" }>
+  | ClientToolCallPart;
 
 export type Message =
   | {
