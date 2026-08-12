@@ -3,16 +3,21 @@ import { useNavigate } from "react-router";
 import { useTheme } from "../providers/theme";
 import { Header } from "../components/Header";
 import { InputBar } from "../components/InputBar";
+import { usePromptConfig } from "../providers/promptConfig";
 
 export function Home() {
+  const { mode, model } = usePromptConfig();
   const { colors } = useTheme();
   const navigate = useNavigate();
 
+  // Same reason as in `Session`: without `mode`/`model` in the deps this
+  // closure keeps the values it captured on mount, so toggling the mode before
+  // sending the first message creates the session with the stale one.
   const handleSubmit = useCallback(
     (text: string) => {
-      navigate("/sessions/new", { state: { message: text } });
+      navigate("/sessions/new", { state: { message: text, mode, model } });
     },
-    [navigate],
+    [navigate, mode, model],
   );
 
   return (

@@ -14,11 +14,13 @@ import { SessionShell } from "../components/SessionShell";
 import { UserMessage } from "../components/messages";
 import { useToast } from "../providers/toast";
 import { apiClient } from "../lib/apiClient";
-import { DEFAULT_CHAT_MODEL_ID } from "@codepilot/shared";
 import { getErrorMessage } from "../lib/httpErrors";
+import { Mode } from "@codepilot/database/enums";
 
 const newSessionStateSchema = z.object({
   message: z.string().min(1),
+  mode: z.enum(Mode),
+  model: z.string(),
 });
 
 /** Sessions are listed by title, so keep it short but recognisable. */
@@ -67,8 +69,8 @@ export function NewSession() {
             initialMessage: {
               role: "USER",
               content: state.message,
-              mode: "BUILD",
-              model: DEFAULT_CHAT_MODEL_ID,
+              mode: state.mode,
+              model: state.model,
             },
           },
         });
@@ -102,7 +104,7 @@ export function NewSession() {
 
   return (
     <SessionShell onSubmit={() => {}} inputDisabled loading>
-      <UserMessage message={state.message} />
+      <UserMessage message={state.message} mode={state.mode} />
       <text>Creating session…</text>
     </SessionShell>
   );

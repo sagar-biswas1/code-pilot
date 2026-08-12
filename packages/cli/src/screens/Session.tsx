@@ -1,5 +1,4 @@
 import { MessageStatus } from "@codepilot/database/enums";
-import { type SupportedChatModelID } from "@codepilot/shared";
 import { useKeyboard } from "@opentui/react";
 import type { InferResponseType } from "hono/client";
 import prettyMs from "pretty-ms";
@@ -9,12 +8,20 @@ import { z } from "zod";
 
 import { SessionShell } from "../components/SessionShell";
 import { BotMessage, ErrorMessage, UserMessage } from "../components/messages";
-import { useChat, type Message } from "../hooks/useChat";
+import {
+  useChat,
+  type ClientMessagePart,
+  type Message,
+} from "../hooks/useChat";
 import { apiClient } from "../lib/apiClient";
 import { getErrorMessage } from "../lib/httpErrors";
 import { useKeyboardLayer } from "../providers/keyboardLayer";
 import { usePromptConfig } from "../providers/promptConfig";
 import { useToast } from "../providers/toast";
+import {
+  messagePartsSchema,
+  type SupportedChatModelID,
+} from "@codepilot/shared";
 
 type SessionData = InferResponseType<
   (typeof apiClient.sessions)[":id"]["$get"],
@@ -51,13 +58,29 @@ function mapDBMessages(dbMessages: SessionData["messages"]): Message[] {
         model: message.model as SupportedChatModelID,
       };
     }
+
+    // Persisted tool calls are already finished; the live stream uses
+    // `status: "calling"` until the matching result arrives.
+    const parsedParts =
+      message.parts == null
+        ? null
+        : messagePartsSchema.safeParse(message.parts);
+    const parts: ClientMessagePart[] = parsedParts?.success
+      ? parsedParts.data.map((part): ClientMessagePart => {
+          if (part.type === "tool-call") {
+            return { ...part, status: "done" };
+          }
+          return part;
+        })
+      : [];
+
     return {
       id: message.id,
       role: "assistant",
       content: message.content,
       mode: message.mode,
       model: message.model as SupportedChatModelID,
-      parts: [{ type: "text", text: message.content }],
+      parts,
       duration:
         message.duration != null ? prettyMs(message.duration) : undefined,
       interrupted: message.status === MessageStatus.INTERRUPTED,
@@ -67,7 +90,7 @@ function mapDBMessages(dbMessages: SessionData["messages"]): Message[] {
 
 function ChatMessage({ message }: { message: Message }) {
   if (message.role === "user") {
-    return <UserMessage message={message.content} />;
+    return <UserMessage message={message.content} mode={message.mode} />;
   }
 
   if (message.role === "error") {
@@ -117,6 +140,10 @@ function SessionChat({ session }: { session: SessionData }) {
     }
   });
 
+  // `mode` and `model` belong in the deps: every callback `submit` depends on
+  // is memoized with a stable identity, so omitting them froze this closure at
+  // its first render — the status bar would show PLAN while the request still
+  // carried the BUILD it captured on mount.
   const handleSubmit = useCallback(
     (text: string) => {
       void submit({
@@ -125,7 +152,7 @@ function SessionChat({ session }: { session: SessionData }) {
         model,
       });
     },
-    [submit],
+    [submit, mode, model],
   );
 
   const isStreaming = streaming.status === "streaming";

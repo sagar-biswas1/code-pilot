@@ -2,7 +2,7 @@ import { MessageStatus, Mode, Role } from "@codepilot/database/enums";
 import { z } from "zod";
 import { isSupportedChatModel, resolveModel } from "../lib/models";
 import { zValidator } from "@hono/zod-validator";
-import { streamText as aiStreamText } from "ai";
+import { streamText as aiStreamText, stepCountIs } from "ai";
 import { db } from "@codepilot/database/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -15,6 +15,8 @@ import {
   toolCallArgsSchema,
   messagePartsSchema,
 } from "@codepilot/shared";
+import { createTools } from "../tools";
+import { buildSystemPrompt } from "../prompts/systemPrompt";
 
 /**
  * Sessions with a resume stream in flight. Guards against two clients (or one
@@ -91,6 +93,7 @@ type StreamParams = {
   requestId: string;
   /** Which endpoint opened the stream — "submit" or "resume". */
   source: "submit" | "resume";
+  cwd?: string | null;
 };
 
 function getResumableUserMessage(
@@ -117,11 +120,17 @@ async function streamAIResponse(
     abortController,
     requestId,
     source,
+    cwd,
   } = params;
   const startTime = Date.now();
   const resolvedModel = resolveModel(model);
   const parts: MessagePart[] = [];
-
+  const tools = cwd
+    ? createTools({
+        workspaceRoot: cwd,
+        mode,
+      })
+    : undefined;
   // `Message.duration` is stored in **milliseconds** — the same unit the
   // `done` event carries — so the CLI can hand either straight to `prettyMs`.
   const persistInterruptedMessage = async () => {
@@ -170,6 +179,12 @@ async function streamAIResponse(
       messages: history,
       abortSignal: abortController.signal,
       providerOptions: resolvedModel.providerOptions,
+      system: buildSystemPrompt({
+        cwd: cwd ?? undefined,
+        mode,
+      }),
+      tools,
+      stopWhen: tools ? stepCountIs(20) : undefined,
     });
 
     for await (const part of result.stream) {
@@ -430,6 +445,7 @@ const app = new Hono<AppEnv>()
           abortController,
           requestId,
           source: "submit",
+          cwd: session.cwd,
         });
       },
 
@@ -546,6 +562,7 @@ const app = new Hono<AppEnv>()
             abortController,
             requestId,
             source: "resume",
+            cwd: session.cwd,
           });
         } finally {
           // Released here, not around `streamSSE` — that call returns its

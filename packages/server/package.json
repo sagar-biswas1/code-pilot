@@ -21,6 +21,7 @@
     "private": true,
     "scripts": {
         "dev": "bun run --hot src/index.ts",
+        "test": "bun test",
         "build": "bun build src/index.ts --outdir dist --target bun",
         "postinstall": "bun run --cwd ../database db:generate"
     },
