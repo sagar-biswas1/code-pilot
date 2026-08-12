@@ -27,7 +27,21 @@ import prettyMs from "pretty-ms";
 import { getErrorMessage } from "../lib/httpErrors";
 import { apiClient } from "../lib/apiClient";
 
-export type ClientMessagePart = { type: "text"; text: string };
+export type ClientToolCallPart = {
+  type: "tool-call";
+  id: string;
+  name: string;
+  args: Record<string, unknown>;
+  result?: string;
+  status: "calling" | "done";
+};
+export type ClientMessagePart =
+  | { type: "text"; text: string }
+  | ClientToolCallPart
+  | {
+      type: "reasoning";
+      text: string;
+    };
 
 export type Message =
   | {
@@ -194,6 +208,38 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
           break;
         }
         switch (event.type) {
+          case "reasoning-delta": {
+            const last = parts[parts.length - 1];
+            if (last && last.type === "reasoning") {
+              last.text += event.text;
+            } else {
+              parts.push({ type: "reasoning", text: event.text });
+            }
+            emitParts(activeStream.requestId, parts);
+            break;
+          }
+          case "tool-call": {
+            parts.push({
+              type: "tool-call",
+              id: event.toolCallId,
+              name: event.toolName,
+              args: event.args,
+              status: "calling",
+            });
+            emitParts(activeStream.requestId, parts);
+            break;
+          }
+          case "tool-result": {
+            const tcPart = parts.find(
+              (p) => p.type === "tool-call" && p.id === event.toolCallId,
+            );
+            if (tcPart) {
+              (tcPart as ClientToolCallPart & { result: string }).result =
+                event.result;
+            }
+            emitParts(activeStream.requestId, parts);
+            break;
+          }
           case "text-delta": {
             // Extend the trailing text part, or start a new one. Once
             // tool-call/reasoning parts land, this merge rule is what keeps
@@ -344,7 +390,13 @@ export function useChat(sessionId: string, initialMessages: Message[]) {
 
       updateMessages((prev) => [
         ...prev,
-        { id: crypto.randomUUID(), role: "user", content: userText, mode, model },
+        {
+          id: crypto.randomUUID(),
+          role: "user",
+          content: userText,
+          mode,
+          model,
+        },
       ]);
 
       await runStream({
