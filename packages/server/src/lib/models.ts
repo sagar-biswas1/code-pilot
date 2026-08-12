@@ -1,13 +1,13 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import { openai } from "@ai-sdk/openai";
 import {
-    findSupportedChatModel,
+  findSupportedChatModel,
   type SupportedChatModel,
   type SupportedChatModelID,
   type SupportedProvider,
 } from "@codepilot/shared";
 import type { LanguageModel } from "ai";
-
+import type { ProviderOptions } from "@ai-sdk/provider-utils";
 type AnthropicModelId = Extract<
   SupportedChatModel,
   { provider: "anthropic" }
@@ -18,8 +18,47 @@ export type ResolvedModel = {
   model: LanguageModel;
   provider: SupportedProvider;
   modelId: SupportedChatModelID;
+  providerOptions?: ProviderOptions;
 };
 
+const ANTROPIC_PROVIDER_OPTIONS: Partial<
+  Record<AnthropicModelId, ProviderOptions>
+> = {
+  "claude-3-5-sonnet-20260319": {
+    anthropic: {
+      thinking: {
+        type: "enabled",
+        budgetTokens: 100000,
+      },
+    },
+  },
+};
+
+export const OPENAI_PROVIDER_OPTIONS: Partial<
+  Record<OpenAIModelId, ProviderOptions>
+> = {
+  "gpt-4o-mini": {
+    openai: {
+      thinking: {
+        reasoningSummary: "detailed",
+      },
+    },
+    "gpt-4o": {
+      openai: {
+        thinking: {
+          reasoningSummary: "detailed",
+        },
+      },
+    },
+    "gpt-5.4-preview": {
+      openai: {
+        thinking: {
+          reasoningSummary: "detailed",
+        },
+      },
+    },
+  },
+};
 /**
  * Providers listed in the shared catalogue that this server can actually talk
  * to. `@codepilot/shared` advertises google and azure models, but no SDK is
@@ -51,6 +90,7 @@ function resolveAnthropicModel(modelId: AnthropicModelId): ResolvedModel {
     model: anthropic(modelId),
     provider: "anthropic",
     modelId,
+    providerOptions: ANTROPIC_PROVIDER_OPTIONS[modelId],
   };
 }
 
@@ -59,6 +99,7 @@ function resolveOpenAIModel(modelId: OpenAIModelId): ResolvedModel {
     model: openai(modelId),
     provider: "openai",
     modelId,
+    providerOptions: OPENAI_PROVIDER_OPTIONS[modelId],
   };
 }
 
