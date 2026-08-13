@@ -28,6 +28,7 @@
 import open from "open";
 
 import { saveAuth } from "./auth";
+import { getErrorMessage as getResponseErrorMessage } from "./httpErrors";
 
 /** How long the user gets to finish signing in before we give up. */
 const LOGIN_TIMEOUT_MS = 5 * 60 * 1000;
@@ -36,6 +37,8 @@ const LOOPBACK_HOST = "127.0.0.1";
 const CALLBACK_PATH = "/callback";
 /** Let the browser's response flush before the socket goes away. */
 const SHUTDOWN_GRACE_MS = 250;
+/** `openid` yields the subject the app token is keyed on; `email` labels it. */
+const OAUTH_SCOPES = "openid profile email";
 
 type OAuthState = {
   nonce: string;
@@ -112,9 +115,9 @@ async function exchangeCodeForToken(options: {
   });
 
   if (!response.ok) {
-    throw new Error(
-      `token exchange failed (${response.status} ${response.statusText})`,
-    );
+    // The server explains *why* the exchange failed ("Authorization code was
+    // rejected", a redirect_uri mismatch); the status line explains nothing.
+    throw new Error(await getResponseErrorMessage(response));
   }
 
   const payload = (await response.json()) as { token?: unknown };
@@ -257,6 +260,9 @@ export async function performLogin(): Promise<AuthResult> {
       `&response_type=code` +
       `&code_challenge=${encodeURIComponent(codeChallenge)}` +
       `&code_challenge_method=S256` +
+      // Without these the server's /oauth/userinfo lookup has no subject or
+      // email to put in the token it mints.
+      `&scope=${encodeURIComponent(OAUTH_SCOPES)}` +
       `&state=${encodeURIComponent(state)}`;
 
     // `open` resolves with a process handle it can't vouch for, so a truthy
