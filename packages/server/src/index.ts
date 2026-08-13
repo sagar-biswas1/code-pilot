@@ -54,6 +54,10 @@ const { default: chatRoutes } = await bootstrap(
   "routes/chat",
   () => import("./routes/chat"),
 );
+const { default: oauthRoutes } = await bootstrap(
+  "routes/oauth",
+  () => import("./routes/oauth"),
+);
 if (!env.isProduction) {
   app.get("/debug-sentry", (c) => {
     logger.info("Sentry debug endpoint hit", {
@@ -175,7 +179,8 @@ app.onError((err, c) => {
 
 const routes = app
   .route("/sessions", sessionsRoutes)
-  .route("/chat", chatRoutes);
+  .route("/chat", chatRoutes)
+  .route("/oauth", oauthRoutes);
 export type AppType = typeof routes;
 
 const server = Bun.serve({

@@ -17,10 +17,26 @@ function toSampleRate(value: string | undefined, fallback: number) {
   return parsed >= 0 && parsed <= 1 ? parsed : fallback;
 }
 
+const port = toNumber(process.env.PORT, 3000);
+
 export const env = {
   nodeEnv,
   isProduction,
-  port: toNumber(process.env.PORT, 3000),
+  port,
+  /**
+   * The server's own public origin. It has to match the `redirect_uri` the CLI
+   * sends and the one registered with Clerk, so it is configuration rather
+   * than something derived from an inbound request (which a proxy can rewrite).
+   */
+  apiUrl: process.env.API_URL?.trim() || `http://localhost:${port}`,
+  clerk: {
+    frontendApi: process.env.CLERK_FRONTEND_API?.trim(),
+    oauthClientId: process.env.CLERK_OAUTH_CLIENT_ID?.trim(),
+    // Never leaves the server — it is the whole reason the CLI delegates the
+    // token exchange instead of talking to Clerk directly.
+    oauthClientSecret: process.env.CLERK_OAUTH_CLIENT_SECRET?.trim(),
+  },
+  jwtSecret: process.env.JWT_SECRET?.trim(),
   sentry: {
     dsn: process.env.SENTRY_DSN,
     environment: process.env.SENTRY_ENVIRONMENT ?? nodeEnv,
