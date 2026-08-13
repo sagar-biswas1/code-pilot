@@ -3,6 +3,8 @@ import { ThemeDialog } from "../ThemeDialog";
 import { SessionDialogueContent } from "../SessionDialogue";
 import { AgentDialogueContent } from "../AgentDialogue";
 import type { Command } from "./types";
+import { performLogin } from "../../lib/oAuth";
+import { deleteAuth } from "../../lib/auth";
 
 /**
  * The registry of slash commands available in the command menu.
@@ -136,22 +138,47 @@ export const COMMANDS: Command[] = [
     name: "login",
     description: "Sign in to your account",
     value: "/login",
-    action: (ctx) => {
+    action: async (ctx) => {
       ctx.toast.show({
         variant: "success",
         message: "Opening login page in your browser",
       });
+      try {
+        await performLogin();
+        ctx.toast.show({
+          variant: "success",
+          message: "Logged in to your account",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          variant: "error",
+          message: "Failed to login",
+        });
+      }
     },
   },
   {
     name: "logout",
     description: "Sign out of your account",
     value: "/logout",
-    action: (ctx) => {
+    action: async (ctx) => {
       ctx.toast.show({
         variant: "info",
         message: "Signed out of your account",
       });
+
+      try {
+        await deleteAuth();
+        ctx.toast.show({
+          variant: "success",
+          message: "Logged out of your account",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          variant: "error",
+          message: "Failed to logout",
+        });
+      }
     },
   },
   {
