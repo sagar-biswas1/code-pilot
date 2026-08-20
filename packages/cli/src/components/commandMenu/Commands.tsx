@@ -150,9 +150,11 @@ export const COMMANDS: Command[] = [
           message: "Logged in to your account",
         });
       } catch (error) {
+        // The reason matters here — a timeout, a denied consent screen and a
+        // misconfigured server all look identical behind "Failed to login".
         ctx.toast.show({
           variant: "error",
-          message: "Failed to login",
+          message: error instanceof Error ? error.message : "Failed to login",
         });
       }
     },

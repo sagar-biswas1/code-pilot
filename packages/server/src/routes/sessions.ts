@@ -7,7 +7,8 @@ import { db } from "@codepilot/database/client";
 import { Role, Mode, MessageStatus } from "@codepilot/database/enums";
 import { logger } from "../lib/logger";
 import { Sentry } from "../lib/sentry";
-import type { AppEnv } from "../types";
+import { requireAuth } from "../middleware/requireAuth";
+import type { AuthEnv } from "../types";
 
 const createSessionSchema = z.object({
   title: z.string().min(1),
@@ -66,10 +67,19 @@ const createSessionValidator = zValidator(
  * chain, so the Prisma stack trace still reaches the issue instead of being
  * replaced by a hand-written message.
  */
-const sessionsRoutes = new Hono<AppEnv>()
+const sessionsRoutes = new Hono<AuthEnv>()
+  // Mounted here rather than in `index.ts` so the guard and the `AuthEnv` type
+  // that depends on it live in the same file — a route added below cannot end
+  // up unprotected while still reading `c.get("userId")`.
+  .use(requireAuth)
   .get("/", async (c) => {
+    const userId = c.get("userId");
+
     try {
       const sessions = await db.session.findMany({
+        where: {
+          userId,
+        },
         orderBy: {
           createdAt: "desc",
         },
@@ -102,11 +112,16 @@ const sessionsRoutes = new Hono<AppEnv>()
   })
   .get("/:id", async (c) => {
     const { id } = c.req.param();
+    const userId = c.get("userId");
 
     try {
-      const session = await db.session.findUnique({
+      // `findFirst` rather than `findUnique`, because the id alone is no
+      // longer enough: someone else's session has to come back as "not found",
+      // not as a 403 that confirms the id exists.
+      const session = await db.session.findFirst({
         where: {
           id,
+          userId,
         },
         include: {
           messages: {
@@ -122,7 +137,7 @@ const sessionsRoutes = new Hono<AppEnv>()
         // an error — the 404 handler in `index.ts` only sees unmatched routes.
         logger.warn("Session not found", {
           request_id: c.get("requestId"),
-          operation: "session.findUnique",
+          operation: "session.findFirst",
           session_id: id,
         });
         return c.json({ error: "Session not found" }, 404);
@@ -130,7 +145,7 @@ const sessionsRoutes = new Hono<AppEnv>()
 
       logger.debug("Fetched session", {
         request_id: c.get("requestId"),
-        operation: "session.findUnique",
+        operation: "session.findFirst",
         session_id: id,
         message_count: session.messages.length,
       });
@@ -139,7 +154,7 @@ const sessionsRoutes = new Hono<AppEnv>()
     } catch (error) {
       logger.error("Failed to fetch session", {
         request_id: c.get("requestId"),
-        operation: "session.findUnique",
+        operation: "session.findFirst",
         session_id: id,
         error: String(error),
       });
@@ -151,6 +166,7 @@ const sessionsRoutes = new Hono<AppEnv>()
   })
   .post("/", createSessionValidator, async (c) => {
     const { initialMessage, ...data } = c.req.valid("json");
+    const userId = c.get("userId");
 
     try {
       // `initialMessage` is required by the schema, so it is always present
@@ -158,7 +174,7 @@ const sessionsRoutes = new Hono<AppEnv>()
       const session = await db.session.create({
         data: {
           ...data,
-          userId: "mock-user-id",
+          userId,
           messages: {
             create: {
               content: initialMessage.content,
