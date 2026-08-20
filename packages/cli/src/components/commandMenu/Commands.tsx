@@ -5,6 +5,7 @@ import { AgentDialogueContent } from "../AgentDialogue";
 import type { Command } from "./types";
 import { performLogin } from "../../lib/oAuth";
 import { deleteAuth } from "../../lib/auth";
+import { openBillingPortal, openUpgradeCheckout } from "../../lib/upgrade";
 
 /**
  * The registry of slash commands available in the command menu.
@@ -187,22 +188,53 @@ export const COMMANDS: Command[] = [
     name: "usage",
     description: "Show usage information",
     value: "/usage",
-    action: (ctx) => {
+    action: async (ctx) => {
       ctx.toast.show({
         variant: "info",
         message: "Opening usage information in your browser",
       });
+
+      try {
+        await openBillingPortal();
+        ctx.toast.show({
+          variant: "success",
+          message: "Opened usage information in your browser",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          variant: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to open usage information",
+        });
+      }
     },
   },
   {
     name: "upgrade",
     description: "Buy more credits",
     value: "/upgrade",
-    action: (ctx) => {
+    action: async (ctx) => {
       ctx.toast.show({
         variant: "info",
         message: "Opening credit purchase page in your browser",
       });
+      try {
+        await openUpgradeCheckout();
+        ctx.toast.show({
+          variant: "success",
+          message: "Opened credit purchase page in your browser",
+        });
+      } catch (error) {
+        ctx.toast.show({
+          variant: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to open credit purchase page",
+        });
+      }
     },
   },
   {

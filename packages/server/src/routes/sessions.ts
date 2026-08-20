@@ -9,6 +9,7 @@ import { logger } from "../lib/logger";
 import { Sentry } from "../lib/sentry";
 import { requireAuth } from "../middleware/requireAuth";
 import type { AuthEnv } from "../types";
+import { requireCreditsBalance } from "../middleware/requireCreditsBalance";
 
 const createSessionSchema = z.object({
   title: z.string().min(1),
@@ -164,7 +165,7 @@ const sessionsRoutes = new Hono<AuthEnv>()
       });
     }
   })
-  .post("/", createSessionValidator, async (c) => {
+  .post("/", requireCreditsBalance, createSessionValidator, async (c) => {
     const { initialMessage, ...data } = c.req.valid("json");
     const userId = c.get("userId");
 

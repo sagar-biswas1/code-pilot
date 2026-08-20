@@ -2,7 +2,11 @@ import { MessageStatus, Mode, Role } from "@codepilot/database/enums";
 import { z } from "zod";
 import { isSupportedChatModel, resolveModel } from "../lib/models";
 import { zValidator } from "@hono/zod-validator";
-import { streamText as aiStreamText, stepCountIs } from "ai";
+import {
+  streamText as aiStreamText,
+  stepCountIs,
+  type LanguageModelUsage,
+} from "ai";
 import { db } from "@codepilot/database/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
@@ -18,6 +22,9 @@ import {
 } from "@codepilot/shared";
 import { createTools } from "../tools";
 import { buildSystemPrompt } from "../prompts/systemPrompt";
+import { calculateCreditsForUsages } from "../lib/credits";
+import { ingestAiUsages } from "../lib/polar";
+import { requireCreditsBalance } from "../middleware/requireCreditsBalance";
 
 /**
  * Sessions with a resume stream in flight. Guards against two clients (or one
@@ -95,6 +102,12 @@ type StreamParams = {
   /** Which endpoint opened the stream — "submit" or "resume". */
   source: "submit" | "resume";
   cwd?: string | null;
+  userId: string;
+};
+
+type IngestUsageForMessageParams = {
+  messageId: string;
+  status: "complete" | "interrupted" | "error";
 };
 
 function getResumableUserMessage(
@@ -122,10 +135,12 @@ async function streamAIResponse(
     requestId,
     source,
     cwd,
+    userId,
   } = params;
   const startTime = Date.now();
   const resolvedModel = resolveModel(model);
   const parts: MessagePart[] = [];
+  let completedUsages: LanguageModelUsage | null = null;
   const tools = cwd
     ? createTools({
         workspaceRoot: cwd,
@@ -145,7 +160,7 @@ async function streamAIResponse(
     const validatedParts: Prisma.InputJsonValue | undefined =
       parts.length > 0 ? messagePartsSchema.parse(parts) : undefined;
 
-    await db.message.create({
+    return db.message.create({
       data: {
         sessionId,
         role: "ASSISTANT",
@@ -156,6 +171,46 @@ async function streamAIResponse(
         mode,
         duration: Date.now() - startTime,
       },
+    });
+  };
+  const ingestUsageForMessage = async ({
+    messageId,
+    status,
+  }: IngestUsageForMessageParams) => {
+    if (!completedUsages) {
+      return;
+    }
+
+    try {
+      const billableUsages = calculateCreditsForUsages({
+        provider: resolvedModel.provider,
+        model: resolvedModel.modelId,
+        usages: completedUsages,
+      });
+
+      await ingestAiUsages({
+        customerExternalID: userId,
+        eventId: `chat-message:${messageId}`,
+        credits: billableUsages.credits,
+      });
+    } catch (error) {
+      logger.error("Failed to ingest usage for message", {
+        message_id: messageId,
+        status,
+        error: String(error),
+      });
+      throw error;
+    }
+  };
+
+  const persisInterruptedMessageAndUsage = async () => {
+    const interruptedMessage = await persistInterruptedMessage();
+    if (!interruptedMessage) {
+      return;
+    }
+    await ingestUsageForMessage({
+      messageId: interruptedMessage.id,
+      status: "interrupted",
     });
   };
 
@@ -180,6 +235,9 @@ async function streamAIResponse(
       messages: history,
       abortSignal: abortController.signal,
       providerOptions: resolvedModel.providerOptions,
+      onFinish: async (completion) => {
+        completedUsages = completion.usage;
+      },
       system: buildSystemPrompt({
         cwd: cwd ?? undefined,
         mode,
@@ -290,7 +348,7 @@ async function streamAIResponse(
           .map((part) => part.text)
           .join("").length,
       });
-      await persistInterruptedMessage();
+      await persisInterruptedMessageAndUsage();
       return;
     }
 
@@ -314,6 +372,12 @@ async function streamAIResponse(
         duration: elapsedMs,
       },
     });
+
+    await ingestUsageForMessage({
+      messageId: assistantMessage.id,
+      status: "complete",
+    });
+
     const doneEvent: ChatStreamEvent = {
       type: "done",
       messageId: assistantMessage.id,
@@ -340,7 +404,7 @@ async function streamAIResponse(
           .map((part) => part.text)
           .join("").length,
       });
-      await persistInterruptedMessage();
+      await persisInterruptedMessageAndUsage();
       return;
     }
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -380,15 +444,16 @@ const app = new Hono<AuthEnv>()
   // Same reasoning as `sessions.ts`: the guard sits with the `AuthEnv` type
   // that only it can satisfy.
   .use(requireAuth)
-  .post("/:sessionId", submitValidator, async (c) => {
+  .post("/:sessionId", requireCreditsBalance, submitValidator, async (c) => {
     const { sessionId } = c.req.param();
     const requestId = c.get("requestId");
+    const userId = c.get("userId");
     // Scoped by owner, so another account's session id reads as missing rather
     // than as something this user is merely not allowed to touch.
     const session = await db.session.findFirst({
       where: {
         id: sessionId,
-        userId: c.get("userId"),
+        userId,
       },
       include: {
         messages: {
@@ -446,6 +511,7 @@ const app = new Hono<AuthEnv>()
         });
         await streamAIResponse(stream, {
           sessionId,
+          userId,
           model,
           history,
           mode,
@@ -481,13 +547,14 @@ const app = new Hono<AuthEnv>()
     );
     return stream;
   })
-  .post("/:sessionId/resume", async (c) => {
+  .post("/:sessionId/resume", requireCreditsBalance, async (c) => {
     const sessionId = c.req.param("sessionId");
     const requestId = c.get("requestId");
+    const userId = c.get("userId");
     const session = await db.session.findFirst({
       where: {
         id: sessionId,
-        userId: c.get("userId"),
+        userId,
       },
       include: {
         messages: {
@@ -564,6 +631,7 @@ const app = new Hono<AuthEnv>()
         try {
           await streamAIResponse(stream, {
             sessionId,
+            userId,
             model: resumableMessage.model,
             history,
             mode: resumableMessage.mode,
