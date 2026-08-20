@@ -7,7 +7,8 @@ import { db } from "@codepilot/database/client";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { logger } from "../lib/logger";
-import type { AppEnv } from "../types";
+import { requireAuth } from "../middleware/requireAuth";
+import type { AuthEnv } from "../types";
 import type { Prisma } from "@codepilot/database";
 import {
   type ChatStreamEvent,
@@ -375,13 +376,19 @@ async function streamAIResponse(
   }
 }
 
-const app = new Hono<AppEnv>()
+const app = new Hono<AuthEnv>()
+  // Same reasoning as `sessions.ts`: the guard sits with the `AuthEnv` type
+  // that only it can satisfy.
+  .use(requireAuth)
   .post("/:sessionId", submitValidator, async (c) => {
     const { sessionId } = c.req.param();
     const requestId = c.get("requestId");
-    const session = await db.session.findUnique({
+    // Scoped by owner, so another account's session id reads as missing rather
+    // than as something this user is merely not allowed to touch.
+    const session = await db.session.findFirst({
       where: {
         id: sessionId,
+        userId: c.get("userId"),
       },
       include: {
         messages: {
@@ -394,7 +401,7 @@ const app = new Hono<AppEnv>()
     if (!session) {
       logger.warn("Session not found for chat submit", {
         request_id: requestId,
-        operation: "session.findUnique",
+        operation: "session.findFirst",
         session_id: sessionId,
       });
       return c.json({ error: "Session not found" }, 404);
@@ -477,9 +484,10 @@ const app = new Hono<AppEnv>()
   .post("/:sessionId/resume", async (c) => {
     const sessionId = c.req.param("sessionId");
     const requestId = c.get("requestId");
-    const session = await db.session.findUnique({
+    const session = await db.session.findFirst({
       where: {
         id: sessionId,
+        userId: c.get("userId"),
       },
       include: {
         messages: {
@@ -492,7 +500,7 @@ const app = new Hono<AppEnv>()
     if (!session) {
       logger.warn("Session not found for chat resume", {
         request_id: requestId,
-        operation: "session.findUnique",
+        operation: "session.findFirst",
         session_id: sessionId,
       });
       return c.json({ error: "Session not found" }, 404);
