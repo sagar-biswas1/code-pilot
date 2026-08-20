@@ -1,6 +1,7 @@
 import { hc } from "hono/client";
 import type { AppType } from "@codepilot/server";
 import { deleteAuth, getAuth } from "./auth";
+import { getErrorMessage } from "./httpErrors";
 
 /**
  * Typed client for the server's Hono app.
@@ -29,10 +30,16 @@ export const apiClient = hc<AppType>(baseUrl, {
     }
 
     const response = await fetch(input, { ...init, headers });
+
     if (response.status === 401) {
+      // Whatever is on disk no longer opens the door — drop it so the next
+      // request doesn't repeat a call that can only fail, and so `/login`
+      // starts from nothing.
       deleteAuth();
-      console.error("Unauthorized. Please login again.");
-      throw new Error("Unauthorized");
+      // `console.error` would paint straight over the TUI's frame. The server
+      // says *why* ("Your session has expired", "Not signed in"), so throw
+      // that and let the caller's existing toast show it.
+      throw new Error(await getErrorMessage(response));
     }
 
     return response;
