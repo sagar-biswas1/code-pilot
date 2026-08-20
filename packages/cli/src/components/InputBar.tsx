@@ -19,7 +19,7 @@ import type {
   TextareaRenderable,
 } from "@opentui/core";
 import { borders, palette, spacing } from "../theme";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 /**
  * Ctrl+A defaults to "line-home" (emacs style); select-all is only on super+A
  * (Cmd/Win), which terminals usually swallow. Remap Ctrl+A to select-all.
@@ -77,6 +77,14 @@ const MAX_FALLBACK_MENTION_CANDIDATES = 32;
  */
 const MAX_FALLBACK_MENTION_DIRECTORIES = 512;
 const MENTION_QUERY_CHARACTER = /[A-Za-z0-9._/-]/;
+/**
+ * Never offered as a candidate, however the query is spelled. Their contents
+ * are still reachable by typing the path out — this only keeps them from
+ * crowding out real answers, which `@` on a fresh repo used to do by leading
+ * with `node_modules/`.
+ */
+const NEVER_OFFERED_ENTRIES = new Set(["node_modules", ".git"]);
+/** Not descended into by the tree search. Still listable if asked for by name. */
 const RECURSIVE_MENTION_IGNORED_DIRECTORIES = new Set([
   "node_modules",
   "dist",
@@ -163,13 +171,130 @@ function toCandidate(
 }
 
 /**
+ * Resolve the directory half of a query to a real location on disk.
+ *
+ * Walked one segment at a time so the *canonical* spelling comes back rather
+ * than what was typed. macOS resolves `packages/CLI` case-insensitively, and
+ * echoing the query back would insert a mention that reads fine here and then
+ * fails on a case-sensitive filesystem. Segments like `..` simply never match
+ * a directory entry, so an escape attempt ends here as `null`.
+ */
+async function resolveMentionDirectory(directoryPart: string): Promise<{
+  absolutePath: string;
+  canonicalPath: string;
+} | null> {
+  let absolutePath = CURRENT_DIRECTORY;
+  let canonicalPath = "";
+
+  for (const segment of directoryPart.split("/")) {
+    if (segment === "" || segment === ".") continue;
+
+    let entries: Dirent[];
+    try {
+      entries = await readdir(absolutePath, { withFileTypes: true });
+    } catch {
+      return null;
+    }
+
+    // Exact spelling wins; a case-insensitive match is the fallback so typing
+    // `@packages/CLI/` still gets somewhere — just under its real name.
+    const match =
+      entries.find((entry) => entry.name === segment) ??
+      entries.find(
+        (entry) => entry.name.toLowerCase() === segment.toLowerCase(),
+      );
+    if (!match?.isDirectory()) return null;
+
+    absolutePath = join(absolutePath, match.name);
+    canonicalPath = canonicalPath
+      ? `${canonicalPath}/${match.name}`
+      : match.name;
+  }
+
+  return isWithinCurrentDirectory(absolutePath)
+    ? { absolutePath, canonicalPath }
+    : null;
+}
+
+/**
+ * Breadth-first search of the tree, for a query the direct listing could not
+ * answer. Shallow matches surface first, which are usually the relevant ones.
+ *
+ * A query containing `/` is matched against each candidate's whole relative
+ * path — `@src/theme` should find `packages/cli/src/theme/`, and matching only
+ * the entry name is exactly why it used to come back empty.
+ */
+async function searchMentionTree(
+  query: string,
+  showHiddenEntries: boolean,
+): Promise<MentionCandidate[]> {
+  const needle = query.toLowerCase();
+  const matchFullPath = needle.includes("/");
+  const matches: MentionCandidate[] = [];
+  const queue: Array<{ absolutePath: string; relativePath: string }> = [
+    { absolutePath: CURRENT_DIRECTORY, relativePath: "" },
+  ];
+
+  let directoriesRead = 0;
+  while (
+    queue.length > 0 &&
+    matches.length < MAX_FALLBACK_MENTION_CANDIDATES &&
+    directoriesRead < MAX_FALLBACK_MENTION_DIRECTORIES
+  ) {
+    const current = queue.shift()!;
+    directoriesRead++;
+
+    let entries: Dirent[];
+    try {
+      entries = await readdir(current.absolutePath, { withFileTypes: true });
+    } catch {
+      // Unreadable directory (permissions, races) — skip it, keep walking.
+      continue;
+    }
+
+    for (const entry of entries.sort(compareEntries)) {
+      if (!showHiddenEntries && entry.name.startsWith(".")) continue;
+      if (NEVER_OFFERED_ENTRIES.has(entry.name)) continue;
+
+      // `isDirectory()` is false for symlinks, so the walk can't cycle.
+      const isDirectory = entry.isDirectory();
+      const relativePath = current.relativePath
+        ? `${current.relativePath}/${entry.name}`
+        : entry.name;
+
+      // Substring rather than prefix: the point of the search is to find
+      // something the user only half-remembers the name of.
+      const haystack = (
+        matchFullPath ? relativePath : entry.name
+      ).toLowerCase();
+      if (haystack.includes(needle)) {
+        matches.push(toCandidate(entry.name, isDirectory, current.relativePath));
+        if (matches.length >= MAX_FALLBACK_MENTION_CANDIDATES) break;
+      }
+
+      if (
+        isDirectory &&
+        !RECURSIVE_MENTION_IGNORED_DIRECTORIES.has(entry.name)
+      ) {
+        queue.push({
+          absolutePath: join(current.absolutePath, entry.name),
+          relativePath,
+        });
+      }
+    }
+  }
+
+  return matches;
+}
+
+/**
  * Resolve an `@` mention query to completion candidates, all relative to the
  * current working directory.
  *
- * The query is read as `<directory>/<name prefix>`: the directory half is
- * listed and filtered by the prefix. When the query is a bare name that
- * matches nothing at the top level, we fall back to a breadth-first walk of
- * the tree so `@InputBar` finds a file nested several directories down.
+ * The query reads as `<directory>/<name prefix>`: the directory half is listed
+ * and filtered by the prefix. Anything that listing can't answer falls through
+ * to {@link searchMentionTree}, so a half-remembered name or a partial path
+ * both still find their target.
  */
 async function getMentionCandidates(
   query: string,
@@ -179,109 +304,46 @@ async function getMentionCandidates(
     return [];
   }
 
-  const hasTrailingSlash = normalizedQuery.endsWith("/");
-  const lastSlashIndex = hasTrailingSlash
-    ? normalizedQuery.length - 1
-    : normalizedQuery.lastIndexOf("/");
-
-  const directoryPart = hasTrailingSlash
-    ? normalizedQuery.slice(0, -1)
-    : lastSlashIndex === -1
-      ? ""
-      : normalizedQuery.slice(0, lastSlashIndex);
-
-  const namePrefix = hasTrailingSlash
-    ? ""
-    : lastSlashIndex === -1
-      ? normalizedQuery
-      : normalizedQuery.slice(lastSlashIndex + 1);
-
-  const absoluteDirectory = resolve(CURRENT_DIRECTORY, directoryPart || ".");
-
-  if (!isWithinCurrentDirectory(absoluteDirectory)) {
-    return [];
-  }
+  // A trailing slash needs no special case: it puts the whole query in the
+  // directory half and leaves an empty prefix, which is "list this directory".
+  const lastSlashIndex = normalizedQuery.lastIndexOf("/");
+  const directoryPart =
+    lastSlashIndex === -1 ? "" : normalizedQuery.slice(0, lastSlashIndex);
+  const namePrefix = normalizedQuery.slice(lastSlashIndex + 1);
 
   const lowerCasePrefix = namePrefix.toLowerCase();
   // A leading dot is the only way to ask for dotfiles; otherwise they're noise.
   const showHiddenEntries = namePrefix.startsWith(".");
 
-  try {
-    const entries = await readdir(absoluteDirectory, { withFileTypes: true });
+  const directory = await resolveMentionDirectory(directoryPart);
+  const directMatches: MentionCandidate[] = [];
 
-    const directMatches = entries
-      .filter((entry) => showHiddenEntries || !entry.name.startsWith("."))
-      .filter((entry) => entry.name.toLowerCase().startsWith(lowerCasePrefix))
-      .sort(compareEntries)
-      .map((entry) =>
-        toCandidate(entry.name, entry.isDirectory(), directoryPart),
+  if (directory) {
+    let entries: Dirent[] = [];
+    try {
+      entries = await readdir(directory.absolutePath, { withFileTypes: true });
+    } catch {
+      // Vanished between resolving and listing — the search below still runs.
+    }
+
+    for (const entry of entries.sort(compareEntries)) {
+      if (!showHiddenEntries && entry.name.startsWith(".")) continue;
+      if (NEVER_OFFERED_ENTRIES.has(entry.name)) continue;
+      if (!entry.name.toLowerCase().startsWith(lowerCasePrefix)) continue;
+      // Built from the canonical directory, not the typed one.
+      directMatches.push(
+        toCandidate(entry.name, entry.isDirectory(), directory.canonicalPath),
       );
-
-    // Only a bare, non-empty query that found nothing earns the tree walk: an
-    // explicit directory means the user is browsing that directory, not
-    // searching, and an empty prefix already listed everything there is.
-    if (directMatches.length > 0 || directoryPart !== "" || namePrefix === "") {
-      return directMatches;
     }
-
-    const fallbackMatches: MentionCandidate[] = [];
-    const queue: Array<{ absolutePath: string; relativePath: string }> = [
-      { absolutePath: absoluteDirectory, relativePath: "" },
-    ];
-
-    // Breadth-first so shallow (usually more relevant) matches come first.
-    let directoriesRead = 0;
-    while (
-      queue.length > 0 &&
-      fallbackMatches.length < MAX_FALLBACK_MENTION_CANDIDATES &&
-      directoriesRead < MAX_FALLBACK_MENTION_DIRECTORIES
-    ) {
-      const current = queue.shift()!;
-      directoriesRead++;
-      let currentEntries: Dirent[];
-      try {
-        currentEntries = await readdir(current.absolutePath, {
-          withFileTypes: true,
-        });
-      } catch {
-        // Unreadable directory (permissions, races) — skip it, keep walking.
-        continue;
-      }
-
-      for (const entry of currentEntries.sort(compareEntries)) {
-        if (!showHiddenEntries && entry.name.startsWith(".")) continue;
-        // `isDirectory()` is false for symlinks, so the walk can't cycle.
-        const isDirectory = entry.isDirectory();
-        if (
-          isDirectory &&
-          RECURSIVE_MENTION_IGNORED_DIRECTORIES.has(entry.name)
-        )
-          continue;
-
-        // Substring rather than prefix: the point of the fallback is to find a
-        // file the user only half-remembers the name of.
-        if (entry.name.toLowerCase().includes(lowerCasePrefix)) {
-          fallbackMatches.push(
-            toCandidate(entry.name, isDirectory, current.relativePath),
-          );
-          if (fallbackMatches.length >= MAX_FALLBACK_MENTION_CANDIDATES) break;
-        }
-
-        if (isDirectory) {
-          queue.push({
-            absolutePath: join(current.absolutePath, entry.name),
-            relativePath: current.relativePath
-              ? `${current.relativePath}/${entry.name}`
-              : entry.name,
-          });
-        }
-      }
-    }
-
-    return fallbackMatches;
-  } catch {
-    return [];
   }
+
+  if (directMatches.length > 0) return directMatches;
+
+  // An empty prefix under a directory that does exist means "show me what's in
+  // here" — the listing is the complete answer, even when it came back empty.
+  if (directory && namePrefix === "") return directMatches;
+
+  return searchMentionTree(normalizedQuery, showHiddenEntries);
 }
 
 /** Width of the leading icon column; wide enough for a double-width emoji. */

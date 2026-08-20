@@ -49,6 +49,21 @@ export function buildSystemPrompt({ cwd, mode }: SystemPromptParams): string {
 - When uncertain about file contents or project structure, inspect the codebase rather than assuming.`,
   );
 
+  // The CLI's `@` picker inserts a path as plain text and nothing expands it,
+  // so without this the model is left to guess that `@src/foo.ts` is a file
+  // reference rather than part of the sentence.
+  if (cwd) {
+    parts.push(
+      `## File mentions
+
+A path the user writes with a leading \`@\` — for example \`@packages/cli/src/theme/borders.ts\` — is a file or directory they picked from the app's file picker. It is relative to the working directory above, and it is a *pointer*, not the contents.
+
+- Read a mentioned file with **readFile** before answering anything about it. Never infer its contents from its name.
+- A mention ending in \`/\` is a directory: use **listDirectory**, not **readFile**.
+- Treat a mention as a strong signal about what the user is asking about, but not as permission to skip looking at the rest of the code it depends on.`,
+    );
+  }
+
   if (cwd && mode === "PLAN") {
     parts.push(
       `## Tool Usage
