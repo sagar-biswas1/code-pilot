@@ -1,7 +1,10 @@
+import { homedir } from "node:os";
+import { useMemo } from "react";
+
 import { spacing } from "../theme";
 import { useTheme } from "../providers/theme";
 import { usePromptConfig } from "../providers/promptConfig";
-import { useMemo } from "react";
+import { WORKSPACE_ROOT } from "../lib/workspace";
 
 export interface StatusBarProps {
   /** Short status label shown on the left (e.g. "Ready", "Thinking…"). */
@@ -19,15 +22,32 @@ const DEFAULT_HINTS: Array<{ key: string; label: string }> = [
 ];
 
 /**
- * Single-line status strip: a status indicator on the left, a truncating
- * contextual message in the middle, and key hints on the right.
+ * `~/projects/app` rather than `/Users/someone/projects/app` — the status line
+ * is one row and the home prefix is the least informative part of the path.
+ */
+function displayPath(absolute: string): string {
+  const home = homedir();
+  return absolute === home
+    ? "~"
+    : absolute.startsWith(`${home}/`)
+      ? `~${absolute.slice(home.length)}`
+      : absolute;
+}
+
+/**
+ * Single-line status strip: mode on the left, the workspace and model in the
+ * middle, and key hints on the right.
  */
 export function StatusBar({ hints = DEFAULT_HINTS }: StatusBarProps) {
   const { colors, textVariant } = useTheme();
   const { mode, model } = usePromptConfig();
-  const message = useMemo(() => {
-    return `Model: ${model}`;
-  }, [mode, model]);
+  // The working directory is part of the status now that tools run against it:
+  // the same session started from the wrong directory edits the wrong project,
+  // and nothing else on screen would say so.
+  const message = useMemo(
+    () => `${displayPath(WORKSPACE_ROOT)}  ·  ${model}`,
+    [model],
+  );
   return (
     <box
       flexGrow={0}

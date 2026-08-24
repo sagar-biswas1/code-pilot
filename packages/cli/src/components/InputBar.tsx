@@ -53,6 +53,7 @@ import { useTheme } from "../providers/theme";
 import { DEFAULT_CHAT_MODEL_ID } from "@codepilot/shared";
 import { useNavigate } from "react-router";
 import { usePromptConfig } from "../providers/promptConfig";
+import { WORKSPACE_ROOT } from "../lib/workspace";
 import type { Dirent } from "node:fs";
 import { readdir } from "node:fs/promises";
 
@@ -68,7 +69,9 @@ export interface InputBarProps {
 }
 
 const MAX_VISIBLE_MENTIONS = 9;
-const CURRENT_DIRECTORY = process.cwd();
+// The same root the tools are bound to, so a path the picker offers is a
+// path `readFile` will accept.
+const CURRENT_DIRECTORY = WORKSPACE_ROOT;
 const MAX_FALLBACK_MENTION_CANDIDATES = 32;
 /**
  * Directory budget for the fallback walk. A query that matches nothing would

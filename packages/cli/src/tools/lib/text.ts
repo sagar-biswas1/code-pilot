@@ -1,4 +1,4 @@
-import { LIMITS } from "./limits";
+import { LIMITS } from "@codepilot/shared";
 
 /**
  * Text handling shared by the file tools. The recurring theme is that model

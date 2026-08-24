@@ -3,7 +3,7 @@ import fsSync from "node:fs";
 import path from "node:path";
 import type { Stats } from "node:fs";
 
-import { LIMITS } from "./limits";
+import { LIMITS } from "@codepilot/shared";
 import { fsError, toolError, type ToolError } from "./result";
 
 /**

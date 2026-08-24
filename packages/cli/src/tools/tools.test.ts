@@ -4,8 +4,9 @@ import os from "node:os";
 import path from "node:path";
 
 import { Mode } from "@codepilot/database/enums";
+import { toolNamesForMode } from "@codepilot/shared";
 
-import { createTools } from "./index";
+import { createToolRunner, type ToolRunner } from "./index";
 
 /**
  * These tests exist for the sandbox, not for the happy path.
@@ -23,10 +24,14 @@ import { createTools } from "./index";
 let root: string;
 let outside: string;
 
-// Minimal shim for the AI SDK's ToolExecutionOptions.
-const opts = { toolCallId: "t", messages: [], context: {} } as any;
-const call = async (tools: any, name: string, input: any) =>
-  await tools[name].execute(input, opts);
+/**
+ * A runner plus the mode to call it in. Each helper below builds a *fresh*
+ * runner, because the read ledger lives on the runner and the tests that check
+ * "you must read before you write" depend on starting from an empty one.
+ */
+type Session = { runner: ToolRunner; mode: Mode };
+const call = async (session: Session, name: string, input: any): Promise<any> =>
+  await session.runner.run(name, input, { mode: session.mode });
 
 beforeAll(() => {
   const base = fs.mkdtempSync(path.join(os.tmpdir(), "cp-tools-test-"));
@@ -55,14 +60,49 @@ afterAll(() => {
   fs.rmSync(path.dirname(root), { recursive: true, force: true });
 });
 
-const build = () => createTools({ workspaceRoot: root, mode: Mode.BUILD });
-const plan = () => createTools({ workspaceRoot: root, mode: Mode.PLAN });
+const build = (): Session => ({
+  runner: createToolRunner({ workspaceRoot: root }),
+  mode: Mode.BUILD,
+});
+const plan = (): Session => ({
+  runner: createToolRunner({ workspaceRoot: root }),
+  mode: Mode.PLAN,
+});
 
 test("PLAN mode exposes no mutating tools", () => {
-  expect(Object.keys(plan()).sort()).toEqual(["glob", "grep", "listDirectory", "readFile"]);
-  expect(Object.keys(build()).sort()).toEqual([
+  expect([...toolNamesForMode(Mode.PLAN)].sort()).toEqual([
+    "glob", "grep", "listDirectory", "readFile",
+  ]);
+  expect([...toolNamesForMode(Mode.BUILD)].sort()).toEqual([
     "editFile", "glob", "grep", "listDirectory", "readFile", "runCommand", "writeFile",
   ]);
+});
+
+test("PLAN mode refuses a mutating call even when one is attempted", async () => {
+  // The server never offers these in PLAN mode, but the runner is the side
+  // that would actually touch the disk, so it refuses them on its own.
+  const p = plan();
+  for (const name of ["writeFile", "editFile", "runCommand"]) {
+    const r = await call(p, name, { path: "src/util.ts", content: "x", command: "ls", oldString: "a", newString: "b" });
+    expect(r.success).toBe(false);
+    expect(r.code).toBe("policy");
+  }
+  expect(fs.readFileSync(path.join(root, "src", "util.ts"), "utf8")).toContain("export function u");
+});
+
+test("an unknown tool name is refused rather than looked up", async () => {
+  for (const name of ["nope", "constructor", "__proto__"]) {
+    const r = await call(build(), name, {});
+    expect(r.success).toBe(false);
+    expect(r.code).toBe("invalid_input");
+  }
+});
+
+test("arguments are validated against the declared schema", async () => {
+  const t = build();
+  expect((await call(t, "readFile", {})).code).toBe("invalid_input");
+  expect((await call(t, "readFile", { path: 42 })).code).toBe("invalid_input");
+  expect((await call(t, "runCommand", { command: "" })).code).toBe("invalid_input");
 });
 
 test("path traversal is rejected", async () => {
@@ -280,7 +320,10 @@ test("runCommand runs in the workspace with a scrubbed environment", async () =>
 });
 
 test("runCommand allowlist rejects everything else", async () => {
-  const t = createTools({ workspaceRoot: root, mode: Mode.BUILD, allowedBinaries: ["echo"] });
+  const t: Session = {
+    runner: createToolRunner({ workspaceRoot: root, allowedBinaries: ["echo"] }),
+    mode: Mode.BUILD,
+  };
   expect((await call(t, "runCommand", { command: "echo hi" })).success).toBe(true);
   expect((await call(t, "runCommand", { command: "cat .env" })).code).toBe("policy");
   expect((await call(t, "runCommand", { command: "FOO=1 cat .env" })).code).toBe("policy");

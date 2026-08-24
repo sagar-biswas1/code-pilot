@@ -83,7 +83,10 @@ function mapDBMessages(dbMessages: SessionData["messages"]): Message[] {
       parts,
       duration:
         message.duration != null ? prettyMs(message.duration) : undefined,
-      interrupted: message.status === MessageStatus.INTERRUPTED,
+      // Anything that is not COMPLETE never finished: either the user cut it
+      // short, or it was still waiting on tool results when the session was
+      // closed. Both read the same way to a reader.
+      interrupted: message.status !== MessageStatus.COMPLETE,
     };
   });
 }
