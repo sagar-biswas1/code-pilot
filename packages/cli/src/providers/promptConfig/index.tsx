@@ -4,7 +4,6 @@ import {
   useState,
   useCallback,
   useMemo,
-  useEffect,
 } from "react";
 import type { ReactNode } from "react";
 import {
@@ -45,10 +44,15 @@ export function PromptConfigProvider({ children }: { children: ReactNode }) {
     setMode((prev) => (prev === Mode.BUILD ? Mode.PLAN : Mode.BUILD));
   }, []);
 
+  // Memoised: a fresh object here re-renders every consumer on any parent
+  // render, and the status bar and input bar both read this context.
+  const value = useMemo(
+    () => ({ mode, toggleMode, setMode, model, setModel }),
+    [mode, toggleMode, model],
+  );
+
   return (
-    <PromptConfigContext.Provider
-      value={{ mode, toggleMode, setMode, model, setModel }}
-    >
+    <PromptConfigContext.Provider value={value}>
       {children}
     </PromptConfigContext.Provider>
   );

@@ -13,7 +13,6 @@ import { requireCreditsBalance } from "../middleware/requireCreditsBalance";
 
 const createSessionSchema = z.object({
   title: z.string().min(1),
-  cwd: z.string().optional(),
   initialMessage: z.object({
     role: z.enum(Role),
     content: z.string().min(1),
@@ -87,7 +86,6 @@ const sessionsRoutes = new Hono<AuthEnv>()
         select: {
           id: true,
           title: true,
-          cwd: true,
           createdAt: true,
         },
       });

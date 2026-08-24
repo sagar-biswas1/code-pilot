@@ -65,7 +65,6 @@ export function NewSession() {
         const res = await apiClient.sessions.$post({
           json: {
             title: state.message.slice(0, MAX_TITLE_LENGTH),
-            cwd: process.cwd(),
             initialMessage: {
               role: "USER",
               content: state.message,

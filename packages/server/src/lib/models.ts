@@ -21,44 +21,41 @@ export type ResolvedModel = {
   providerOptions?: ProviderOptions;
 };
 
-const ANTROPIC_PROVIDER_OPTIONS: Partial<
+/**
+ * Adaptive thinking, not a fixed budget: `budgetTokens` is rejected outright by
+ * the current Claude models, which decide their own depth. `display` has to be
+ * asked for as well — these models omit the reasoning summary by default, and
+ * without it the CLI shows a long silence instead of a "thinking" aside.
+ */
+const ANTHROPIC_PROVIDER_OPTIONS: Partial<
   Record<AnthropicModelId, ProviderOptions>
 > = {
-  "claude-3-5-sonnet-20260319": {
-    anthropic: {
-      thinking: {
-        type: "enabled",
-        budgetTokens: 100000,
-      },
-    },
+  "claude-sonnet-5": {
+    anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+  },
+  "claude-opus-5": {
+    anthropic: { thinking: { type: "adaptive", display: "summarized" } },
+  },
+  "claude-haiku-4-5": {
+    anthropic: { thinking: { type: "adaptive", display: "summarized" } },
   },
 };
 
+/**
+ * One entry per model id — and currently no entries at all.
+ *
+ * `reasoningSummary` used to be set here, but neither `gpt-4o` nor
+ * `gpt-4o-mini` is a reasoning model, so the provider dropped it with a
+ * warning on every single request. (It was previously nested *inside* the
+ * `gpt-4o-mini` entry, which made every other lookup return `undefined` and
+ * gave `gpt-4o-mini` an options object containing two model ids as keys.)
+ *
+ * Add an entry when a model that actually reasons is added to the catalogue;
+ * the lookup below already handles the empty case.
+ */
 export const OPENAI_PROVIDER_OPTIONS: Partial<
   Record<OpenAIModelId, ProviderOptions>
-> = {
-  "gpt-4o-mini": {
-    openai: {
-      thinking: {
-        reasoningSummary: "detailed",
-      },
-    },
-    "gpt-4o": {
-      openai: {
-        thinking: {
-          reasoningSummary: "detailed",
-        },
-      },
-    },
-    "gpt-5.4-preview": {
-      openai: {
-        thinking: {
-          reasoningSummary: "detailed",
-        },
-      },
-    },
-  },
-};
+> = {};
 /**
  * Providers listed in the shared catalogue that this server can actually talk
  * to. `@codepilot/shared` advertises google and azure models, but no SDK is
@@ -90,7 +87,7 @@ function resolveAnthropicModel(modelId: AnthropicModelId): ResolvedModel {
     model: anthropic(modelId),
     provider: "anthropic",
     modelId,
-    providerOptions: ANTROPIC_PROVIDER_OPTIONS[modelId],
+    providerOptions: ANTHROPIC_PROVIDER_OPTIONS[modelId],
   };
 }
 

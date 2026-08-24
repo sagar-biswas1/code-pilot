@@ -27,6 +27,10 @@ enum Mode {
 enum MessageStatus {
   COMPLETE
   INTERRUPTED
+  /// The assistant asked for tools and the turn is parked until the CLI runs
+  /// them and posts the results back. Rendered like a live reply, not a
+  /// finished one.
+  PENDING_TOOLS
 }
 
 
@@ -35,7 +39,6 @@ model Session {
   id String @id @default(cuid())
   userId String
   title String
-  cwd String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
   messages Message[]

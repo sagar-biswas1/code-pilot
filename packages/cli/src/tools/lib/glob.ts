@@ -1,5 +1,5 @@
 import { toolError, type ToolError } from "./result";
-import { LIMITS } from "./limits";
+import { LIMITS } from "@codepilot/shared";
 
 /**
  * A small, deliberately boring glob compiler.

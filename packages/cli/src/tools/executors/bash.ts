@@ -1,12 +1,11 @@
-import { tool } from "ai";
-import { z } from "zod";
 import { spawn } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 
-import { LIMITS } from "./lib/limits";
-import { toolError } from "./lib/result";
+import { LIMITS } from "@codepilot/shared";
+import { toolError } from "../lib/result";
+import type { ToolExecutor } from "../lib/executor";
 
 /**
  * `runCommand` — the tool with no real sandbox.
@@ -114,7 +113,9 @@ function appendCapped(current: string, chunk: string, cap: number) {
   return { text: current + chunk.slice(0, remaining), dropped: true };
 }
 
-export function createBashTool(options: BashToolOptions = {}) {
+export function createRunCommandExecutor(
+  options: BashToolOptions = {},
+): ToolExecutor<"runCommand"> {
   const cwd =
     options.cwd ?? fs.mkdtempSync(path.join(os.tmpdir(), "agent-sandbox-"));
   const env = buildSafeEnv(cwd, options.env);
@@ -127,193 +128,175 @@ export function createBashTool(options: BashToolOptions = {}) {
     LIMITS.bash.maxTimeoutMs,
   );
 
-  return tool({
-    description:
-      "Run a shell command in the workspace directory. Use it for builds, tests, linters, and package managers — " +
-      "prefer readFile/writeFile/editFile/glob/grep for file work, since they are safer and cheaper. " +
-      "Commands are non-interactive (stdin is closed), time out, and have their output truncated.",
-    inputSchema: z.object({
-      command: z.string().min(1).describe("The shell command to execute."),
-      timeout: z
-        .number()
-        .int()
-        .min(1_000)
-        .max(LIMITS.bash.maxTimeoutMs)
-        .optional()
-        .describe(
-          `Timeout in milliseconds (default ${LIMITS.bash.defaultTimeoutMs}, capped at ${hardMaxTimeout}).`,
-        ),
-    }),
-    execute: async ({ command, timeout }, { abortSignal }) => {
-      if (command.includes("\0")) {
-        return toolError("invalid_input", "Command contains a NUL byte.");
-      }
-      if (command.length > LIMITS.bash.maxCommandLength) {
+  return async ({ command, timeout }, { abortSignal }) => {
+    if (command.includes("\0")) {
+      return toolError("invalid_input", "Command contains a NUL byte.");
+    }
+    if (command.length > LIMITS.bash.maxCommandLength) {
+      return toolError(
+        "invalid_input",
+        `Command is too long (limit ${LIMITS.bash.maxCommandLength} characters).`,
+      );
+    }
+
+    for (const pattern of blockedPatterns) {
+      if (pattern.test(command)) {
         return toolError(
-          "invalid_input",
-          `Command is too long (limit ${LIMITS.bash.maxCommandLength} characters).`,
+          "policy",
+          "Command rejected by security policy. If this was intentional, ask the user to run it themselves.",
         );
       }
+    }
 
-      for (const pattern of blockedPatterns) {
-        if (pattern.test(command)) {
-          return toolError(
-            "policy",
-            "Command rejected by security policy. If this was intentional, ask the user to run it themselves.",
-          );
-        }
+    if (options.allowedBinaries) {
+      const binary = firstToken(command);
+      if (!options.allowedBinaries.includes(binary)) {
+        return toolError(
+          "policy",
+          `Command rejected: '${binary}' is not in the allowed binaries list (${options.allowedBinaries.join(", ")}).`,
+        );
       }
+    }
 
-      if (options.allowedBinaries) {
-        const binary = firstToken(command);
-        if (!options.allowedBinaries.includes(binary)) {
-          return toolError(
-            "policy",
-            `Command rejected: '${binary}' is not in the allowed binaries list (${options.allowedBinaries.join(", ")}).`,
-          );
+    const effectiveTimeout = Math.min(
+      timeout ?? LIMITS.bash.defaultTimeoutMs,
+      hardMaxTimeout,
+    );
+    const startedAt = Date.now();
+
+    return await new Promise((resolve) => {
+      const child = spawn(command, {
+        shell: true,
+        cwd,
+        env,
+        // stdin is closed: a command that waits for input would otherwise
+        // hold the slot until the timeout, every time.
+        stdio: ["ignore", "pipe", "pipe"],
+        // Own process group, so the kill below reaches grandchildren too —
+        // killing the shell alone orphans whatever it spawned.
+        detached: true,
+      });
+
+      let stdout = "";
+      let stderr = "";
+      let stdoutDropped = false;
+      let stderrDropped = false;
+      let settled = false;
+      let outcome: "ok" | "timeout" | "aborted" = "ok";
+
+      const signalGroup = (signal: NodeJS.Signals) => {
+        if (!child.pid) return;
+        try {
+          process.kill(-child.pid, signal);
+        } catch {
+          // Already gone, or the group could not be formed.
         }
-      }
+      };
 
-      const effectiveTimeout = Math.min(
-        timeout ?? LIMITS.bash.defaultTimeoutMs,
-        hardMaxTimeout,
-      );
-      const startedAt = Date.now();
+      // SIGTERM first so the command can flush and clean up; SIGKILL only if
+      // it ignores that. Killing outright leaves lockfiles and temp state.
+      let killTimer: ReturnType<typeof setTimeout> | undefined;
+      const terminate = () => {
+        signalGroup("SIGTERM");
+        killTimer = setTimeout(() => signalGroup("SIGKILL"), LIMITS.bash.killGraceMs);
+      };
 
-      return await new Promise((resolve) => {
-        const child = spawn(command, {
-          shell: true,
-          cwd,
-          env,
-          // stdin is closed: a command that waits for input would otherwise
-          // hold the slot until the timeout, every time.
-          stdio: ["ignore", "pipe", "pipe"],
-          // Own process group, so the kill below reaches grandchildren too —
-          // killing the shell alone orphans whatever it spawned.
-          detached: true,
-        });
+      const timer = setTimeout(() => {
+        outcome = "timeout";
+        terminate();
+      }, effectiveTimeout);
 
-        let stdout = "";
-        let stderr = "";
-        let stdoutDropped = false;
-        let stderrDropped = false;
-        let settled = false;
-        let outcome: "ok" | "timeout" | "aborted" = "ok";
+      const onAbort = () => {
+        outcome = "aborted";
+        terminate();
+      };
+      abortSignal?.addEventListener("abort", onAbort, { once: true });
 
-        const signalGroup = (signal: NodeJS.Signals) => {
-          if (!child.pid) return;
-          try {
-            process.kill(-child.pid, signal);
-          } catch {
-            // Already gone, or the group could not be formed.
-          }
-        };
+      const cleanup = () => {
+        clearTimeout(timer);
+        if (killTimer) clearTimeout(killTimer);
+        abortSignal?.removeEventListener("abort", onAbort);
+      };
 
-        // SIGTERM first so the command can flush and clean up; SIGKILL only if
-        // it ignores that. Killing outright leaves lockfiles and temp state.
-        let killTimer: ReturnType<typeof setTimeout> | undefined;
-        const terminate = () => {
-          signalGroup("SIGTERM");
-          killTimer = setTimeout(() => signalGroup("SIGKILL"), LIMITS.bash.killGraceMs);
-        };
+      child.stdout?.on("data", (chunk: Buffer) => {
+        const appended = appendCapped(
+          stdout,
+          chunk.toString("utf8"),
+          LIMITS.bash.maxStreamChars,
+        );
+        stdout = appended.text;
+        stdoutDropped ||= appended.dropped;
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        const appended = appendCapped(
+          stderr,
+          chunk.toString("utf8"),
+          LIMITS.bash.maxStreamChars,
+        );
+        stderr = appended.text;
+        stderrDropped ||= appended.dropped;
+      });
 
-        const timer = setTimeout(() => {
-          outcome = "timeout";
-          terminate();
-        }, effectiveTimeout);
+      child.on("error", (error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(
+          toolError("io_error", `Failed to start command: ${error.message}`),
+        );
+      });
 
-        const onAbort = () => {
-          outcome = "aborted";
-          terminate();
-        };
-        abortSignal?.addEventListener("abort", onAbort, { once: true });
+      child.on("close", (code, signal) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
 
-        const cleanup = () => {
-          clearTimeout(timer);
-          if (killTimer) clearTimeout(killTimer);
-          abortSignal?.removeEventListener("abort", onAbort);
-        };
+        const durationMs = Date.now() - startedAt;
 
-        child.stdout?.on("data", (chunk: Buffer) => {
-          const appended = appendCapped(
-            stdout,
-            chunk.toString("utf8"),
-            LIMITS.bash.maxStreamChars,
-          );
-          stdout = appended.text;
-          stdoutDropped ||= appended.dropped;
-        });
-        child.stderr?.on("data", (chunk: Buffer) => {
-          const appended = appendCapped(
-            stderr,
-            chunk.toString("utf8"),
-            LIMITS.bash.maxStreamChars,
-          );
-          stderr = appended.text;
-          stderrDropped ||= appended.dropped;
-        });
-
-        child.on("error", (error) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          resolve(
-            toolError("io_error", `Failed to start command: ${error.message}`),
-          );
-        });
-
-        child.on("close", (code, signal) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-
-          const durationMs = Date.now() - startedAt;
-
-          if (outcome === "timeout") {
-            resolve({
-              success: false as const,
-              code: "timeout" as const,
-              error: `Command timed out after ${effectiveTimeout}ms and was terminated.`,
-              durationMs,
-              stdout,
-              stderr,
-            });
-            return;
-          }
-          if (outcome === "aborted") {
-            resolve({
-              success: false as const,
-              code: "aborted" as const,
-              error: "Command was cancelled.",
-              durationMs,
-            });
-            return;
-          }
-
-          const truncated = stdoutDropped || stderrDropped;
-          const suffix = truncated
-            ? `\n…[output truncated at ${LIMITS.bash.maxStreamChars} characters per stream]`
-            : "";
-
+        if (outcome === "timeout") {
           resolve({
-            success: code === 0,
-            exitCode: code ?? undefined,
-            ...(signal ? { signal } : {}),
+            success: false as const,
+            code: "timeout" as const,
+            error: `Command timed out after ${effectiveTimeout}ms and was terminated.`,
             durationMs,
-            truncated,
-            stdout: stdout + (stdoutDropped ? suffix : ""),
-            stderr: stderr + (stderrDropped ? suffix : ""),
-            ...(code === 0 && stdout === "" && stderr === ""
-              ? { note: "Command succeeded with no output." }
-              : {}),
-            ...(code !== 0
-              ? {
-                  error: `Command exited with code ${code}${signal ? ` (signal ${signal})` : ""}.`,
-                }
-              : {}),
+            stdout,
+            stderr,
           });
+          return;
+        }
+        if (outcome === "aborted") {
+          resolve({
+            success: false as const,
+            code: "aborted" as const,
+            error: "Command was cancelled.",
+            durationMs,
+          });
+          return;
+        }
+
+        const truncated = stdoutDropped || stderrDropped;
+        const suffix = truncated
+          ? `\n…[output truncated at ${LIMITS.bash.maxStreamChars} characters per stream]`
+          : "";
+
+        resolve({
+          success: code === 0,
+          exitCode: code ?? undefined,
+          ...(signal ? { signal } : {}),
+          durationMs,
+          truncated,
+          stdout: stdout + (stdoutDropped ? suffix : ""),
+          stderr: stderr + (stderrDropped ? suffix : ""),
+          ...(code === 0 && stdout === "" && stderr === ""
+            ? { note: "Command succeeded with no output." }
+            : {}),
+          ...(code !== 0
+            ? {
+                error: `Command exited with code ${code}${signal ? ` (signal ${signal})` : ""}.`,
+              }
+            : {}),
         });
       });
-    },
-  });
+    });
+  };
 }

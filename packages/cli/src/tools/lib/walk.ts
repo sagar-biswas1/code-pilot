@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { Dirent } from "node:fs";
 
-import { DEFAULT_IGNORED_DIRECTORIES, LIMITS } from "./limits";
+import { DEFAULT_IGNORED_DIRECTORIES, LIMITS } from "@codepilot/shared";
 import type { Workspace } from "./workspace";
 
 /**

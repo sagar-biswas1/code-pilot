@@ -65,20 +65,30 @@ export async function createCustomerPortalUrl({
   return result.customerPortalUrl;
 }
 
+/**
+ * Credits the customer has left, or 0.
+ *
+ * "No meter" is a *normal* state, not a failure: a customer who has never
+ * bought anything has no active meters at all, and neither does one whose
+ * product carries no meter-credit benefit. Throwing here used to surface as
+ * "Insufficient credits" for everyone — which is the right answer by accident,
+ * and the wrong one as soon as Polar has an outage, because an unreachable API
+ * would read as an empty wallet too.
+ *
+ * A genuine transport or auth failure still throws, so the caller can tell the
+ * two apart.
+ */
 export async function getAvailableCreditsBalance(customerExternalID: string) {
   try {
     const customerState = await polar.customers.getStateExternal({
       externalId: customerExternalID,
     });
-    const matchingMeters = customerState.activeMeters.filter(
+    const creditsMeter = customerState.activeMeters.find(
       (meter) => meter.meterId === getPolarCreditsMeterId(),
     );
-    if (matchingMeters.length === 0) {
-      throw new Error("Credits meter not found");
-    }
-    const creditsMeter = matchingMeters[0];
-    return creditsMeter?.balance || 0;
+    return creditsMeter?.balance ?? 0;
   } catch (error) {
+    // The customer does not exist in Polar yet — they have never checked out.
     if (hasStatusCode(error) && error.statusCode === 404) {
       return 0;
     }
